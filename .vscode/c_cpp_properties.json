@@ -1,0 +1,31 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/fusapatto/.arduino15/packages/esp32/hardware/esp32/3.3.8/cores/esp32",
+                "/home/fusapatto/.arduino15/packages/esp32/hardware/esp32/3.3.8/libraries/BLE/src",
+                "/home/fusapatto/.arduino15/packages/esp32/tools/esp32-libs/3.3.8/include",
+                "/home/fusapatto/.arduino15/packages/esp32/tools/esp32-libs/3.3.8/include/**"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/**",
+                    "/home/fusapatto/.arduino15/packages/esp32/hardware/esp32/3.3.8/cores/esp32",
+                    "/home/fusapatto/.arduino15/packages/esp32/hardware/esp32/3.3.8/libraries/BLE/src",
+                    "/home/fusapatto/.arduino15/packages/esp32/tools/esp32-libs/3.3.8/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            },
+            "defines": [
+                "ESP32"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++20",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
