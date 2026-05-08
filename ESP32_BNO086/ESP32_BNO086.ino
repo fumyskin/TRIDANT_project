@@ -11,14 +11,6 @@
   Arduino IDE Setup:
   - Make sure the ESP32 boards package is installed (Boards Manager → "esp32" by Espressif).
 
-  For CodeCell C3 (ESP32-C3):
-  - Board: ESP32C3 Dev Module
-  - USB CDC On Boot: Enabled   // required for Serial over USB
-  - CPU Frequency: 160 MHz
-  - Flash Size: 4 MB (32 Mb)
-  - Partition Scheme: Minimal SPIFFS (1.9MB APP with OTA / 190KB SPIFFS)
-  - Port: Select the COM port for your CodeCell C3
-
   For CodeCell C6 (ESP32-C6):
   - Board: ESP32C6 Dev Module
   - USB CDC On Boot: Enabled   // required for Serial over USB
@@ -129,16 +121,21 @@
 
 CodeCell myCodeCell;
 
+float Roll = 0.0;
+float Pitch = 0.0;
+float Yaw = 0.0;
+
 void setup() {
   Serial.begin(115200);  // Start USB serial at 115200 baud (enable USB_CDC_On_Boot for Serial)
 
-  myCodeCell.Init(LIGHT);  // Enable Light + Proximity sensing
+  myCodeCell.Intit(MOTION_ROTATION);
 
   // Add your custom initialization below
 }
 
 void loop() {
   if (myCodeCell.Run(10)) {     // Run every 10 Hz
-    myCodeCell.PrintSensors();  // Print all enabled sensor values
+    myCodeCell.Motion_RotationRead(Roll, Pitch, Yaw); // Read latest rotation values
+    Serial.printf("Roll: %.2f°, Pitch: %.2f°, Yaw: %.2f°\n", Roll, Pitch, Yaw); // Print  output
   }
 }
