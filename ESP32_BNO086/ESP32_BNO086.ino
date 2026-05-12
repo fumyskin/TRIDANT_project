@@ -121,21 +121,50 @@
 
 CodeCell myCodeCell;
 
+#define BUTTON_PIN 21 // GPIO21 pin connected to button
+#define CHARGE_LED_PIN 22 //GPIO22 pin connected to LED
+#define LPD_VOLTAGE_PIN 1 //GPIO01 pin connected to Vout of LPD
+
 float Roll = 0.0;
 float Pitch = 0.0;
 float Yaw = 0.0;
 
+int lastState = HIGH; // the previous state from the input pin
+int currentState;     // the current reading from the input pin
+
+float lpdVoltage = 0.0;
+
 void setup() {
   Serial.begin(115200);  // Start USB serial at 115200 baud (enable USB_CDC_On_Boot for Serial)
 
+  pinMode(1, )
+  pinMode(21, INPUT_PULLUP); // config GPIO21 as input pin and enable the internal pull-up resistor
+  pinMode(22, OUTPUT) // config GPIO22 as output pin for charge status LED
   myCodeCell.Intit(MOTION_ROTATION);
 
   // Add your custom initialization below
 }
 
 void loop() {
-  if (myCodeCell.Run(10)) {     // Run every 10 Hz
-    myCodeCell.Motion_RotationRead(Roll, Pitch, Yaw); // Read latest rotation values
-    Serial.printf("Roll: %.2f°, Pitch: %.2f°, Yaw: %.2f°\n", Roll, Pitch, Yaw); // Print  output
+  
+  if(myCodeCell.BatteryVoltageRead() <= 20){
+    digitalWrite(CHARGE_LED_PIN, HIGH);
+  }else{
+    digitalWrite(CHARGE_LED_PIN, LOW);
   }
+
+  if (myCodeCell.Run(10)) {     // Run every 10 Hz
+    currentState = digitalRead(BUTTON_PIN);
+
+    if(lastState == LOW && currentState == HIGH){
+      myCodeCell.Motion_RotationRead(Roll, Pitch, Yaw); // Read latest rotation values
+      Serial.printf("Roll: %.2f°, Pitch: %.2f°, Yaw: %.2f°\n", Roll, Pitch, Yaw); // Print  output
+
+      //ALL CODE FOR BLUETOOTH TRANSMISSION OF COMPUTED DATA
+    }
+
+    lastState = currentState;
+  }
+
+
 }
