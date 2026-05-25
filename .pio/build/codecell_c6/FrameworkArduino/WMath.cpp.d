@@ -1,0 +1,20 @@
+.pio/build/codecell_c6/FrameworkArduino/WMath.cpp.o: \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32/cores/esp32/WMath.cpp \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_system/include/esp_system.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_common/include/esp_err.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_common/include/esp_compiler.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_common/include/esp_attr.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_common/include/esp_bit_defs.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_common/include/esp_idf_version.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-log.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_timer/include/esp_timer.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_hw_support/include/esp_etm.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_rom/esp32c6/include/esp32c6/rom/ets_sys.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/log/include/esp_log.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_rom/include/esp_rom_sys.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/soc/esp32c6/include/soc/reset_reasons.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/log/include/esp_log_level.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/log/include/esp_log_color.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/log/include/esp_log_buffer.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/log/include/esp_log_timestamp.h \
+ /home/fusapatto/.platformio/packages/framework-arduinoespressif32-libs/esp32c6/include/esp_hw_support/include/esp_random.h
