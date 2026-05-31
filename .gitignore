@@ -1,1 +1,4 @@
 .pio/
+.pio/build/
+.pio/libdeps/
+.vscode/
