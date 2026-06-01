@@ -4,18 +4,20 @@ Reads CSV lines from ESP32 serial port and plots a live 2D polar pattern.
 
 Usage:
     pip install pyserial matplotlib numpy
-    python antenna_pattern.py --port COM3          # Windows
-    python antenna_pattern.py --port /dev/ttyUSB0  # Linux/Mac
+    python antenna_pattern.py --port COM3            # Windows
+    python antenna_pattern.py --port /dev/ttyUSB0    # Linux/Mac
     python antenna_pattern.py --port /dev/ttyUSB0 --baud 115200
+    python antenna_pattern.py --port /dev/ttyUSB0 --dyn-range 30 --bin 5
 """
 
 import argparse
 import threading
+from collections import deque
+
 import serial
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from collections import defaultdict
 
 # ── CLI args ─────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Live 2D polar antenna pattern")
@@ -23,16 +25,32 @@ parser.add_argument("--port",  default="/dev/ttyUSB0", help="Serial port")
 parser.add_argument("--baud",  type=int, default=115200)
 parser.add_argument("--bin",   type=float, default=5.0,
                     help="Angular bin size in degrees (default 5°)")
+parser.add_argument("--dyn-range", type=float, default=40.0,
+                    help="Radial dynamic range in dB below peak (default 40)")
+parser.add_argument("--min-samples", type=int, default=3,
+                    help="Minimum samples per bin before plotting that bin")
+parser.add_argument("--window", type=int, default=20,
+                    help="Rolling-mean window per bin (most-recent N samples)")
+parser.add_argument("--warmup", type=int, default=10,
+                    help="Discard the first N valid CSV lines after open")
+parser.add_argument("--dbm-min", type=float, default=-70.0,
+                    help="Reject samples weaker than this (dBm)")
+parser.add_argument("--dbm-max", type=float, default=10.0,
+                    help="Reject samples stronger than this (dBm)")
 args = parser.parse_args()
+
+# Number of angular bins covering 0..360
+NBINS    = int(round(360.0 / args.bin))
+BIN_DEGS = np.arange(NBINS) * args.bin
 
 # ── Shared state (protected by a lock) ───────────────────────────────────────
 lock    = threading.Lock()
-# Maps azimuth_bin (deg) → list of P_dBm values received in that bin
-buckets = defaultdict(list)   # raw accumulator
-samples = 0                   # total samples received
+# One bounded deque per bin → rolling window of the most recent samples
+buckets = {a: deque(maxlen=args.window) for a in BIN_DEGS}
+samples = 0   # total samples accepted
 
 def serial_reader():
-    """Background thread: reads lines, parses CSV, fills buckets."""
+    """Background thread: reads lines, parses CSV, fills bin deques."""
     global samples
     try:
         ser = serial.Serial(args.port, args.baud, timeout=1)
@@ -40,6 +58,8 @@ def serial_reader():
     except serial.SerialException as e:
         print(f"[serial] ERROR: {e}")
         return
+
+    warmup_remaining = args.warmup
 
     while True:
         try:
@@ -58,12 +78,25 @@ def serial_reader():
         except ValueError:
             continue
 
+        # Reject physically implausible readings (boot-time mv=0 gives +80 dBm,
+        # detector saturation at the low end gives big positive values too)
+        if not (args.dbm_min <= p_dbm <= args.dbm_max):
+            continue
+
+        # Discard the first few valid lines after opening the port — covers
+        # any residual boot-time garbage and lets sensors settle
+        if warmup_remaining > 0:
+            warmup_remaining -= 1
+            continue
+
         # Snap to nearest bin
-        bin_deg = round(phi_deg / args.bin) * args.bin
-        bin_deg = bin_deg % 360.0
+        bin_deg = (round(phi_deg / args.bin) * args.bin) % 360.0
 
         with lock:
-            buckets[bin_deg].append(p_dbm)
+            # Bin centers come from BIN_DEGS, so the key may need normalising
+            # if args.bin doesn't divide 360 evenly — round to nearest known key
+            key = BIN_DEGS[int(round(bin_deg / args.bin)) % NBINS]
+            buckets[key].append(p_dbm)
             samples += 1
 
 # ── Start reader thread ───────────────────────────────────────────────────────
@@ -81,58 +114,73 @@ ax.spines["polar"].set_color("#2a3a4a")
 ax.yaxis.label.set_color("#88a0b8")
 ax.grid(color="#1e2e3e", linestyle="--", linewidth=0.6)
 
-# Dynamic r-axis will be set each frame
+# Fixed radial axis: 0 at center = (peak - dyn_range), outer rim = peak
+DYN = args.dyn_range
+ax.set_ylim(0, DYN)
+r_ticks = np.linspace(0, DYN, 5)
+ax.set_yticks(r_ticks)
+# Tick labels are updated each frame to show actual dBm values
+
 line, = ax.plot([], [], color="#00e5ff", linewidth=1.8, alpha=0.9)
-fill  = ax.fill([], [], color="#00e5ff", alpha=0.12)
+fill_patch, = ax.fill([0], [0], color="#00e5ff", alpha=0.12)
 
 title = ax.set_title("Antenna Pattern (live)", color="#cde4f5",
-                      pad=18, fontsize=13, fontweight="bold")
+                     pad=18, fontsize=13, fontweight="bold")
 status_text = ax.text(0.5, -0.08, "waiting for data…",
                       transform=ax.transAxes, ha="center",
                       color="#88a0b8", fontsize=9)
 
 def update(_frame):
     with lock:
-        snap    = dict(buckets)
-        n_samp  = samples
+        # Snapshot: mean dBm per bin, or NaN if bin doesn't have enough samples
+        means = np.array([
+            np.mean(buckets[a]) if len(buckets[a]) >= args.min_samples else np.nan
+            for a in BIN_DEGS
+        ])
+        n_samp   = samples
+        n_filled = int(np.sum(~np.isnan(means)))
 
-    if not snap:
-        return line, *fill
+    if n_filled == 0:
+        status_text.set_text(f"{n_samp} samples  ·  no bins ready yet")
+        return line, fill_patch
 
-    # Average dBm per bin, then build arrays sorted by angle
-    angles_deg = sorted(snap.keys())
-    powers_dbm = [np.mean(snap[a]) for a in angles_deg]
+    # Peak is the strongest mean across all populated bins
+    p_peak = np.nanmax(means)
+    p_min  = np.nanmin(means)
 
-    # Close the loop for plotting
-    angles_deg_c = angles_deg + [angles_deg[0]]
-    powers_dbm_c = powers_dbm + [powers_dbm[0]]
+    # Map dBm → radial position: peak sits at outer rim (=DYN),
+    # peak − DYN dB sits at center (=0). NaN bins stay NaN so the
+    # line breaks across gaps instead of bridging them with chords.
+    r = means - p_peak + DYN
+    r = np.where(np.isnan(r), np.nan, np.clip(r, 0, DYN))
 
-    angles_rad = np.radians(angles_deg_c)
+    # Close the loop ONLY if the wrap-around bin (0°) is itself populated;
+    # otherwise leave it open so we don't draw a chord across the gap.
+    angles_deg = np.concatenate([BIN_DEGS, [360.0]])
+    r_closed   = np.concatenate([r, [r[0]]])
+    angles_rad = np.radians(angles_deg)
 
-    # Normalise: shift so minimum = 0 for nice radial display
-    p_arr  = np.array(powers_dbm_c)
-    p_min  = p_arr.min()
-    p_norm = p_arr - p_min          # all ≥ 0
+    line.set_data(angles_rad, r_closed)
 
-    line.set_data(angles_rad, p_norm)
+    # Fill polygon: build from finite points only, so gaps don't create
+    # weird triangles back to the origin
+    finite = np.isfinite(r_closed)
+    if finite.sum() >= 3:
+        fill_patch.set_xy(np.column_stack([angles_rad[finite], r_closed[finite]]))
+    else:
+        fill_patch.set_xy(np.zeros((1, 2)))
 
-    # Rebuild fill patch
-    fill[0].set_xy(np.column_stack([angles_rad, p_norm]))
-
-    # Annotate r-axis with real dBm values
-    r_max = p_norm.max() if p_norm.max() > 0 else 1
-    ax.set_ylim(0, r_max * 1.1)
-    ticks     = np.linspace(0, r_max, 5)
-    tick_dbm  = ticks + p_min
-    ax.set_yticks(ticks)
+    # Tick labels: convert radial position back to dBm for display
+    tick_dbm = r_ticks + (p_peak - DYN)
     ax.set_yticklabels([f"{v:.0f} dBm" for v in tick_dbm],
                        color="#88a0b8", fontsize=7)
 
     status_text.set_text(
-        f"{n_samp} samples  ·  {len(snap)} bins  ·  "
-        f"range {p_arr.min():.1f}…{p_arr.max():.1f} dBm"
+        f"{n_samp} samples  ·  {n_filled}/{NBINS} bins  ·  "
+        f"range {p_min:.1f}…{p_peak:.1f} dBm  ·  "
+        f"showing peak−{DYN:.0f} dB"
     )
-    return line, *fill
+    return line, fill_patch
 
 ani = animation.FuncAnimation(fig, update, interval=200, blit=False)
 
