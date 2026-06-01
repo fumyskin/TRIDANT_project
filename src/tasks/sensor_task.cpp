@@ -18,9 +18,11 @@ TaskHandle_t  sensorTaskHandle = nullptr;
 static void sensorTask(void*)
 {
     for (;;) {
-        // pinADC returns 0..4095 raw counts; convert to mV assuming 3.3V reference
-        uint16_t raw = myCodeCell.pinADC(LDR_PIN);
-        int value_mv = (int)((raw * 3300L) / 4095);
+        // pinADC returns 0..4095 raw counts; convert to mV assuming 3.3V reference -> wrong, the reference is 2.5V for codecell c6 ADC
+        uint32_t acc = 0;
+        const int N = 32;
+        for (int i = 0; i < N; ++i) acc += analogReadMilliVolts(LDR_PIN);
+        int value_mv = acc / N;
         xQueueOverwrite(latestQueue, &value_mv);
         vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }
