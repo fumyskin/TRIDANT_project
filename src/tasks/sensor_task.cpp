@@ -18,7 +18,7 @@ TaskHandle_t  sensorTaskHandle = nullptr;
 static void sensorTask(void*)
 {
     for (;;) {
-        // pinADC returns 0..4095 raw counts; convert to mV assuming 3.3V reference -> wrong, the reference is 2.5V for codecell c6 ADC
+        // pinADC returns 0..4095 raw counts; convert to mV knowing the reference is 2.5V for codecell c6 ADC
         uint32_t acc = 0;
         const int N = 32;
         for (int i = 0; i < N; ++i) acc += analogReadMilliVolts(LDR_PIN);
