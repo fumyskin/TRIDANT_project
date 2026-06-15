@@ -4,13 +4,16 @@
 #include <CodeCell.h>
 #include <Wire.h>
 
-// --- From your detector's datasheet (AD8318-like placeholders) ---
-constexpr float LPD_SLOPE_MV_PER_DB = -25.0f;
-constexpr float LPD_INTERCEPT_MV    = 2000.0f;
+// Refer to APD8317 documentation for correct parametrization:
+// correct calibration:
+constexpr float LPD_SLOPE_MV_PER_DB = -22.0f; // mV/dBm
+constexpr float LPD_INTERCEPT_MV    = 15.0f; // dBm
 
 static float mv_to_dbm(int mv) {
     return ((float)mv - LPD_INTERCEPT_MV) / LPD_SLOPE_MV_PER_DB;
 }
+
+BnoSample ang;
 
 void setup() {
     Serial.begin(115200);
@@ -19,6 +22,11 @@ void setup() {
 
     sensor_task_start();
     bno_task_init();        // do BNO Init() in main thread
+    Serial.println("Move device in figure-8 for calibration...");
+    bno_task_warmup(15000);   // 15 s of active sensor ticking
+    Serial.println("Capturing zero — hold still");
+    delay(500);    
+    bno_task_capture_zero();
     bno_task_start();       // then start the task that only does Run/Read
 
     Serial.println("tasks started");
@@ -27,7 +35,6 @@ void setup() {
 
 void loop() {
     int mv = 0;
-    BnoSample ang;
     bool haveP   = sensor_task_get_latest_mv(&mv);
     bool haveAng = bno_task_get_latest(&ang);
 

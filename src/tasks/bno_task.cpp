@@ -11,80 +11,94 @@
 CodeCell myCodeCell;
 
 namespace {
-constexpr int  RUN_RATE_HZ = 10;
-const char* TAG = "BNO";
+    constexpr int  RUN_RATE_HZ = 10;
+    const char*    TAG = "BNO";
+    QueueHandle_t  latestQueue   = nullptr;
+    TaskHandle_t   bnoTaskHandle = nullptr;
+    constexpr float RAD2DEG = 57.2957795f;
 
-QueueHandle_t latestQueue   = nullptr;
-TaskHandle_t  bnoTaskHandle = nullptr;
+    float heading_offset = 0.0f;
 
-constexpr float RAD2DEG = 57.2957795f;
+    inline float wrap360(float deg) {
+        deg = fmodf(deg, 360.0f);
+        if (deg < 0.0f) deg += 360.0f;
+        return deg;
+    }
 
-inline float wrap360(float deg) {
-    deg = fmodf(deg, 360.0f);
-    if (deg < 0.0f) deg += 360.0f;
-    return deg;
-}
-}
+    void compute_angles(float ax, float ay, float az,
+                        float mx, float my, float mz,
+                        BnoSample* s) {
+        float pitch = atan2f(-ax, sqrtf(ay*ay + az*az));
+        float roll  = atan2f(ay, az);
+        float cp = cosf(pitch), sp = sinf(pitch);
+        float cr = cosf(roll),  sr = sinf(roll);
+        float mx_h = mx * cp + mz * sp;
+        float my_h = mx * sr * sp + my * cr - mz * sr * cp;
+        float yaw  = atan2f(-my_h, mx_h) * RAD2DEG;
 
-// Tilt-compensated heading from accelerometer + magnetometer.
-// ax,ay,az: gravity vector (m/s^2 or g; only the direction matters)
-// mx,my,mz: magnetic field (uT)
-// Outputs azimuth (0..360) and elevation/polar angles in degrees.
-static void compute_angles(float ax, float ay, float az,
-                           float mx, float my, float mz,
-                           BnoSample* s)
-{
-    // Pitch and roll from gravity vector.
-    float pitch = atan2f(-ax, sqrtf(ay * ay + az * az));   // rotation around Y
-    float roll  = atan2f(ay, az);                          // rotation around X
+        s->azimuth_deg   = wrap360(yaw);              // raw, offset applied later
+        s->elevation_deg = pitch * RAD2DEG;
+        s->polar_deg     = 90.0f - s->elevation_deg;
+        if (s->polar_deg < 0.0f)   s->polar_deg = 0.0f;
+        if (s->polar_deg > 180.0f) s->polar_deg = 180.0f;
+        s->qi = ax; s->qj = ay; s->qk = az; s->qr = 0.0f;
+    }
 
-    // Tilt-compensate the magnetometer into the horizontal plane.
-    float cp = cosf(pitch), sp = sinf(pitch);
-    float cr = cosf(roll),  sr = sinf(roll);
+    // Block on main thread until one fresh Run() tick, return raw azimuth.
+    float read_azimuth_blocking() {
+        float ax = 0, ay = 0, az = 0;
+        float mx = 0, my = 0, mz = 0;
+        while (!myCodeCell.Run(RUN_RATE_HZ)) {
+            delay(5);
+        }
+        myCodeCell.Motion_AccelerometerRead(ax, ay, az);
+        myCodeCell.Motion_MagnetometerRead(mx, my, mz);
+        BnoSample s = {};
+        compute_angles(ax, ay, az, mx, my, mz, &s);
+        return s.azimuth_deg;
+    }
+} // namespace
 
-    float mx_h = mx * cp + mz * sp;
-    float my_h = mx * sr * sp + my * cr - mz * sr * cp;
-
-    float yaw = atan2f(-my_h, mx_h) * RAD2DEG;   // heading
-
-    s->azimuth_deg   = wrap360(yaw);
-    s->elevation_deg = pitch * RAD2DEG;
-    s->polar_deg     = 90.0f - s->elevation_deg;
-    if (s->polar_deg < 0.0f)   s->polar_deg = 0.0f;
-    if (s->polar_deg > 180.0f) s->polar_deg = 180.0f;
-
-    // Stash raw vectors for post-processing if you want them.
-    s->qi = ax; s->qj = ay; s->qk = az; s->qr = 0.0f;
-}
-
-static void bnoTask(void*)
-{
-    // Init was already done in bno_task_init()
+static void bnoTask(void*) {
     float ax = 0, ay = 0, az = 0;
     float mx = 0, my = 0, mz = 0;
-
     for (;;) {
         if (myCodeCell.Run(RUN_RATE_HZ)) {
             myCodeCell.Motion_AccelerometerRead(ax, ay, az);
             myCodeCell.Motion_MagnetometerRead(mx, my, mz);
-
             BnoSample sample = {};
             compute_angles(ax, ay, az, mx, my, mz, &sample);
+            // Apply the captured zero so consumers see start-relative azimuth.
+            sample.azimuth_deg  = wrap360(sample.azimuth_deg - heading_offset);
             sample.accuracy_rad = 0.0f;
-
             xQueueOverwrite(latestQueue, &sample);
         }
         vTaskDelay(1);
     }
 }
 
-void bno_task_init(void)
-{
+void bno_task_warmup(uint32_t ms) {
+    float ax, ay, az, mx, my, mz;
+    uint32_t start = millis();
+    while (millis() - start < ms) {
+        if (myCodeCell.Run(RUN_RATE_HZ)) {
+            myCodeCell.Motion_AccelerometerRead(ax, ay, az);
+            myCodeCell.Motion_MagnetometerRead(mx, my, mz);
+            // discard — we just want the sensor ticking
+        }
+        delay(5);
+    }
+}
+
+void bno_task_init(void) {
     myCodeCell.Init(MOTION_ACCELEROMETER + MOTION_MAGNETOMETER);
 }
 
-void bno_task_start(void)
-{
+void bno_task_capture_zero(void) {
+    heading_offset = read_azimuth_blocking();
+}
+
+void bno_task_start(void) {
     latestQueue = xQueueCreate(1, sizeof(BnoSample));
     xTaskCreate(bnoTask, "BNO Task", 8192, nullptr, 1, &bnoTaskHandle);
 }
