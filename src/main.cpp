@@ -8,7 +8,7 @@
 // correct calibration:
 // NOTE: V2X and GNSS require different x intercepts: deal with it 
 constexpr float LPD_SLOPE_MV_PER_DB = -25.0f; // mV/dBm
-constexpr float LPD_INTERCEPT_MV    = 20.0f; // dBm
+constexpr float LPD_INTERCEPT_MV    = 2100.0f; // mV
 
 static float mv_to_dbm(int mv) {
     return ((float)mv - LPD_INTERCEPT_MV) / LPD_SLOPE_MV_PER_DB;
