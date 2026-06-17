@@ -1,196 +1,118 @@
-// bno_task.cpp
+// bno_task.cpp  — MOTION_ROTATION_NO_MAG (gyro+accel, interference-proof)
 #include "bno_task.h"
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
-#include <esp_log.h>
 #include <math.h>
 #include <CodeCell.h>
+#include <BNO085.h>          // type behind the wrapper, for the accuracy byte
 
 CodeCell myCodeCell;
+extern BNO085 Motion;        // global IMU object defined inside the CodeCell lib
 
 namespace {
-    constexpr int  RUN_RATE_HZ = 10;
-    const char*    TAG = "BNO";
-    QueueHandle_t  latestQueue   = nullptr;
-    TaskHandle_t   bnoTaskHandle = nullptr;
-    constexpr float RAD2DEG = 57.2957795f;
+constexpr int RUN_RATE_HZ = 10;
 
-    float heading_offset = 0.0f;
+QueueHandle_t latestQueue   = nullptr;
+TaskHandle_t  bnoTaskHandle = nullptr;
 
-    inline float wrap360(float deg) {
-        deg = fmodf(deg, 360.0f);
-        if (deg < 0.0f) deg += 360.0f;
-        return deg;
+float            yaw_offset     = 0.0f;   // captured zero -> start-relative azimuth
+volatile uint8_t cal_accuracy   = 0;      // game-RV fusion readiness, 0..3
+volatile bool    zero_requested = false;
+
+inline float wrap360(float deg) {
+    deg = fmodf(deg, 360.0f);
+    if (deg < 0.0f) deg += 360.0f;
+    return deg;
+}
+
+void fill_sample(float roll, float pitch, float yaw, BnoSample* s) {
+    s->azimuth_deg = wrap360(yaw - yaw_offset);
+
+    // Elevation from pitch — CONFIRM axis against your physical mount.
+    s->elevation_deg = pitch;
+    s->polar_deg     = 90.0f - s->elevation_deg;
+    if (s->polar_deg < 0.0f)   s->polar_deg = 0.0f;
+    if (s->polar_deg > 180.0f) s->polar_deg = 180.0f;
+}
+
+float read_yaw_blocking() {
+    float r = 0, p = 0, y = 0;
+    while (!myCodeCell.Run(RUN_RATE_HZ)) {
+        delay(5);
     }
-
-    void compute_angles(float ax, float ay, float az,
-                        float mx, float my, float mz,
-                        BnoSample* s) {
-        float pitch = atan2f(-ax, sqrtf(ay*ay + az*az));
-        float roll  = atan2f(ay, az);
-        float cp = cosf(pitch), sp = sinf(pitch);
-        float cr = cosf(roll),  sr = sinf(roll);
-        float mx_h = mx * cp + mz * sp;
-        float my_h = mx * sr * sp + my * cr - mz * sr * cp;
-        float yaw  = atan2f(-my_h, mx_h) * RAD2DEG;
-
-        s->azimuth_deg   = wrap360(yaw);              // raw, offset applied later
-        s->elevation_deg = pitch * RAD2DEG;
-        s->polar_deg     = 90.0f - s->elevation_deg;
-        if (s->polar_deg < 0.0f)   s->polar_deg = 0.0f;
-        if (s->polar_deg > 180.0f) s->polar_deg = 180.0f;
-        s->qi = ax; s->qj = ay; s->qk = az; s->qr = 0.0f;
-    }
-
-    // Block on main thread until one fresh Run() tick, return raw azimuth.
-    float read_azimuth_blocking() {
-        float ax = 0, ay = 0, az = 0;
-        float mx = 0, my = 0, mz = 0;
-        while (!myCodeCell.Run(RUN_RATE_HZ)) {
-            delay(5);
-        }
-        myCodeCell.Motion_AccelerometerRead(ax, ay, az);
-        myCodeCell.Motion_MagnetometerRead(mx, my, mz);
-        BnoSample s = {};
-        compute_angles(ax, ay, az, mx, my, mz, &s);
-        return s.azimuth_deg;
-    }
+    myCodeCell.Motion_RotationNoMagRead(r, p, y);
+    return wrap360(y);
+}
 } // namespace
 
 static void bnoTask(void*) {
-    float ax = 0, ay = 0, az = 0;
-    float mx = 0, my = 0, mz = 0;
+    float roll = 0, pitch = 0, yaw = 0;
     for (;;) {
         if (myCodeCell.Run(RUN_RATE_HZ)) {
-            myCodeCell.Motion_AccelerometerRead(ax, ay, az);
-            myCodeCell.Motion_MagnetometerRead(mx, my, mz);
+            myCodeCell.Motion_RotationNoMagRead(roll, pitch, yaw);
+            cal_accuracy = Motion.getRot_Accuracy() & 0x03;   // mask off delay bits
+
+            if (zero_requested) {              // single-owner runtime re-zero
+                yaw_offset = wrap360(yaw);
+                zero_requested = false;
+            }
+
             BnoSample sample = {};
-            compute_angles(ax, ay, az, mx, my, mz, &sample);
-            // Apply the captured zero so consumers see start-relative azimuth.
-            sample.azimuth_deg  = wrap360(sample.azimuth_deg - heading_offset);
-            sample.accuracy_rad = 0.0f;
+            fill_sample(roll, pitch, yaw, &sample);
+
+            // Real game-rotation quaternion (valid: only game-RV is enabled here).
+            sample.qr = Motion.getGameReal();
+            sample.qi = Motion.getGameI();
+            sample.qj = Motion.getGameJ();
+            sample.qk = Motion.getGameK();
+
+            sample.accuracy_rad = 0.0f;        // no radian estimate for game-RV
             xQueueOverwrite(latestQueue, &sample);
         }
         vTaskDelay(1);
     }
 }
 
-void bno_task_warmup(uint32_t ms) {
-    float ax, ay, az, mx, my, mz;
+// Hold the board DEAD STILL on a stable surface for the whole window so the BNO
+// can detect stationarity and compute the gyro zero-rate offset. This is what
+// kills the 1°/s drift?? Returns the achieved fusion accuracy.
+bool bno_task_calibrate(uint32_t still_ms, uint8_t target_acc) {
+    float r, p, y;
     uint32_t start = millis();
-    while (millis() - start < ms) {
+    while (millis() - start < still_ms) {
         if (myCodeCell.Run(RUN_RATE_HZ)) {
-            myCodeCell.Motion_AccelerometerRead(ax, ay, az);
-            myCodeCell.Motion_MagnetometerRead(mx, my, mz);
-            // discard — we just want the sensor ticking
+            myCodeCell.Motion_RotationNoMagRead(r, p, y);
+            cal_accuracy = Motion.getRot_Accuracy() & 0x03;
         }
         delay(5);
     }
+    return cal_accuracy >= target_acc;
 }
 
 void bno_task_init(void) {
-    myCodeCell.Init(MOTION_ACCELEROMETER + MOTION_MAGNETOMETER);
+    myCodeCell.Init(MOTION_ROTATION_NO_MAG);
+    // The wrapper never enables gyro calibration -> ZRO uncorrected -> ~1°/s drift.
+    // Turn on accel+gyro dynamic calibration so the fusion estimates and removes
+    // the gyro bias during stillness -> THERE EXISTS A FUNCTION ON CODECELL LIBRARY YES!!
+    Motion.setCalibrationConfig(SH2_CAL_ACCEL | SH2_CAL_GYRO);
 }
 
 void bno_task_capture_zero(void) {
-    heading_offset = read_azimuth_blocking();
+    yaw_offset = read_yaw_blocking();
 }
+
+void bno_task_request_zero(void) { zero_requested = true; }
+
+uint8_t bno_task_cal_accuracy(void) { return cal_accuracy; }
 
 void bno_task_start(void) {
     latestQueue = xQueueCreate(1, sizeof(BnoSample));
     xTaskCreate(bnoTask, "BNO Task", 8192, nullptr, 1, &bnoTaskHandle);
 }
 
-bool bno_task_get_latest(BnoSample* out)
-{
+bool bno_task_get_latest(BnoSample* out) {
     if (!latestQueue || !out) return false;
     return xQueuePeek(latestQueue, out, 0) == pdTRUE;
 }
-
-
-// // bno_task.cpp
-// #include "bno_task.h"
-// #include <Arduino.h>
-// #include <freertos/FreeRTOS.h>
-// #include <freertos/task.h>
-// #include <freertos/queue.h>
-// #include <esp_log.h>
-// #include <math.h>
-// #include <CodeCell.h>
-
-// namespace {
-// constexpr int  RUN_RATE_HZ = 20;        // IMU update rate
-// const char* TAG = "BNO";
-
-// QueueHandle_t latestQueue   = nullptr;  // depth 1, overwrite slot
-// TaskHandle_t  bnoTaskHandle = nullptr;
-
-// CodeCell myCodeCell;
-
-// constexpr float RAD2DEG = 57.2957795f;
-
-// inline float wrap360(float deg) {
-//     deg = fmodf(deg, 360.0f);
-//     if (deg < 0.0f) deg += 360.0f;
-//     return deg;
-// }
-// }
-
-// // Quaternion -> antenna spherical angles.
-// // TUNE THIS to match how the CodeCell is mounted on your positioner.
-// static void quat_to_angles(float qi, float qj, float qk, float qr, BnoSample* s)
-// {
-//     float yaw   = atan2f(2.0f * (qr * qk + qi * qj),
-//                          1.0f - 2.0f * (qj * qj + qk * qk)) * RAD2DEG;
-//     float pitch = asinf (2.0f * (qr * qj - qk * qi)) * RAD2DEG;
-
-//     s->azimuth_deg   = wrap360(yaw);
-//     s->elevation_deg = pitch;
-//     s->polar_deg     = 90.0f - pitch;
-//     if (s->polar_deg < 0.0f)   s->polar_deg = 0.0f;
-//     if (s->polar_deg > 180.0f) s->polar_deg = 180.0f;
-// }
-
-// static void bnoTask(void*)
-// {
-//     myCodeCell.Init(MOTION_ROTATION);   // enable rotation-vector fusion
-//     ESP_LOGI(TAG, "CodeCell BNO085 rotation vector enabled");
-
-//     for (;;) {
-//         // Run(Hz) returns true at the requested cadence; it paces the loop.
-//         if (myCodeCell.Run(RUN_RATE_HZ)) {
-//             BnoSample sample = {};
-
-//             // Quaternion read: order is (r, i, j, k) — real part first.
-//             float vr = 0, vi = 0, vj = 0, vk = 0;
-//             myCodeCell.Motion_RotationVectorRead(vr, vi, vj, vk);
-
-//             sample.qr = vr;
-//             sample.qi = vi;
-//             sample.qj = vj;
-//             sample.qk = vk;
-
-//             quat_to_angles(sample.qi, sample.qj, sample.qk, sample.qr, &sample);
-//             sample.accuracy_rad = 0.0f;
-
-//             xQueueOverwrite(latestQueue, &sample);
-//         }
-//         // No vTaskDelay needed: Run(Hz) blocks/paces internally. Yield briefly
-//         // so the idle task and watchdog are happy if Run returns immediately.
-//         vTaskDelay(1);
-//     }
-// }
-
-// void bno_task_start(void)
-// {
-//     latestQueue = xQueueCreate(1, sizeof(BnoSample));
-//     xTaskCreate(bnoTask, "BNO Task", 8192, nullptr, 1, &bnoTaskHandle);
-// }
-
-// bool bno_task_get_latest(BnoSample* out)
-// {
-//     if (!latestQueue || !out) return false;
-//     return xQueuePeek(latestQueue, out, 0) == pdTRUE;
-// }

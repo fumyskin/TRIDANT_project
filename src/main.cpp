@@ -22,32 +22,31 @@ void setup() {
     Serial.println("BOOT");
 
     sensor_task_start();
-    bno_task_init();        // do BNO Init() in main thread
-    Serial.println("Move device in figure-8 for calibration...");
-    bno_task_warmup(15000);   // 15 s of active sensor ticking
-    Serial.println("Capturing zero — hold still");
-    delay(500);    
+    bno_task_init();
+    bno_task_calibrate(8000, 3);   // ~8 s DEAD STILL on a table — gyro ZRO settles here
     bno_task_capture_zero();
-    bno_task_start();       // then start the task that only does Run/Read
+    bno_task_start();
 
     Serial.println("tasks started");
-    Serial.println("phi_deg,theta_deg,elev_deg,P_dBm,mv");
+    Serial.println("phi_deg,theta_deg,elev_deg,P_dBm,mv,cal");   // <- added ,cal
 }
 
 void loop() {
     int mv = 0;
     bool haveP   = sensor_task_get_latest_mv(&mv);
     bool haveAng = bno_task_get_latest(&ang);
+    uint32_t acc = bno_task_cal_accuracy();
 
     if (haveP && haveAng) {
-        Serial.printf("%.1f,%.1f,%.1f,%.2f,%d\n",
+        Serial.printf("%.1f,%.1f,%.1f,%.2f,%d, %u\n",
                       ang.azimuth_deg,
                       ang.polar_deg,
                       ang.elevation_deg,
                       mv_to_dbm(mv),
-                      mv);
+                      mv,
+                      acc);
     } else {
-        Serial.printf("waiting: haveP=%d haveAng=%d\n", haveP, haveAng);
+        Serial.printf("waiting: haveP=%d haveAng=%d cal=%u\n", haveP, haveAng, acc);
     }
     delay(100);   // ~10 Hz logging, matches the BNO Run(10) rate
 }
