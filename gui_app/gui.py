@@ -1,6 +1,8 @@
 """
 Live Antenna Pattern Plotter
-Reads CSV lines from ESP32 serial port and plots a live 2D polar pattern.
+Reads CSV lines from ESP32 serial port and plots two live 2D polar cuts
+side by side: the azimuth pattern (binned on phi) and the elevation pattern
+(binned on elev), like standard antenna-pattern graphs.
 
 Usage:
     pip install pyserial matplotlib numpy
@@ -45,12 +47,21 @@ BIN_DEGS = np.arange(NBINS) * args.bin
 
 # ── Shared state (protected by a lock) ───────────────────────────────────────
 lock    = threading.Lock()
-# One bounded deque per bin → rolling window of the most recent samples
-buckets = {a: deque(maxlen=args.window) for a in BIN_DEGS}
-samples = 0   # total samples accepted
+# One bounded deque per bin → rolling window of the most recent samples.
+# Two parallel sets of buckets: one keyed by azimuth bin, one by elevation bin.
+buckets_az = {a: deque(maxlen=args.window) for a in BIN_DEGS}
+buckets_el = {a: deque(maxlen=args.window) for a in BIN_DEGS}
+samples = 0   # total samples accepted (shared: each goes into both planes)
+
+
+def snap_key(angle_deg):
+    """Snap an angle to the nearest known bin center key in BIN_DEGS."""
+    bin_deg = (round(angle_deg / args.bin) * args.bin) % 360.0
+    return BIN_DEGS[int(round(bin_deg / args.bin)) % NBINS]
+
 
 def serial_reader():
-    """Background thread: reads lines, parses CSV, fills bin deques."""
+    """Background thread: reads lines, parses CSV, fills both bin sets."""
     global samples
     try:
         ser = serial.Serial(args.port, args.baud, timeout=1)
@@ -73,8 +84,9 @@ def serial_reader():
         if len(parts) != 5:
             continue
         try:
-            phi_deg = float(parts[0])   # azimuth
-            p_dbm   = float(parts[3])   # RF power
+            phi_deg  = float(parts[0])   # azimuth
+            elev_deg = float(parts[2])   # elevation
+            p_dbm    = float(parts[3])   # RF power
         except ValueError:
             continue
 
@@ -89,60 +101,78 @@ def serial_reader():
             warmup_remaining -= 1
             continue
 
-        # Snap to nearest bin
-        bin_deg = (round(phi_deg / args.bin) * args.bin) % 360.0
-
         with lock:
-            # Bin centers come from BIN_DEGS, so the key may need normalising
-            # if args.bin doesn't divide 360 evenly — round to nearest known key
-            key = BIN_DEGS[int(round(bin_deg / args.bin)) % NBINS]
-            buckets[key].append(p_dbm)
+            # Same sample lands in both planes, keyed by its own angle
+            buckets_az[snap_key(phi_deg)].append(p_dbm)
+            buckets_el[snap_key(elev_deg)].append(p_dbm)
             samples += 1
+
 
 # ── Start reader thread ───────────────────────────────────────────────────────
 t = threading.Thread(target=serial_reader, daemon=True)
 t.start()
 
-# ── Matplotlib polar plot setup ───────────────────────────────────────────────
-fig = plt.figure(figsize=(7, 7), facecolor="#0d1117")
-ax  = fig.add_subplot(111, projection="polar", facecolor="#0d1117")
-
-ax.set_theta_zero_location("N")   # 0° at top (North)
-ax.set_theta_direction(-1)        # clockwise, like a compass
-ax.tick_params(colors="#88a0b8")
-ax.spines["polar"].set_color("#2a3a4a")
-ax.yaxis.label.set_color("#88a0b8")
-ax.grid(color="#1e2e3e", linestyle="--", linewidth=0.6)
-
-# Fixed radial axis: 0 at center = (peak - dyn_range), outer rim = peak
+# ── Matplotlib: two polar subplots side by side ───────────────────────────────
 DYN = args.dyn_range
-ax.set_ylim(0, DYN)
-r_ticks = np.linspace(0, DYN, 5)
-ax.set_yticks(r_ticks)
-# Tick labels are updated each frame to show actual dBm values
+fig = plt.figure(figsize=(13, 7), facecolor="#0d1117")
 
-line, = ax.plot([], [], color="#00e5ff", linewidth=1.8, alpha=0.9)
-fill_patch, = ax.fill([0], [0], color="#00e5ff", alpha=0.12)
 
-title = ax.set_title("Antenna Pattern (live)", color="#cde4f5",
-                     pad=18, fontsize=13, fontweight="bold")
-status_text = ax.text(0.5, -0.08, "waiting for data…",
-                      transform=ax.transAxes, ha="center",
-                      color="#88a0b8", fontsize=9)
+def make_polar_axis(pos, title):
+    """Build and style one polar cut; return its mutable artists + ticks."""
+    ax = fig.add_subplot(pos, projection="polar", facecolor="#0d1117")
+    ax.set_theta_zero_location("N")   # 0° at top
+    ax.set_theta_direction(-1)        # clockwise, like a compass
+    ax.tick_params(colors="#88a0b8")
+    ax.spines["polar"].set_color("#2a3a4a")
+    ax.yaxis.label.set_color("#88a0b8")
+    ax.grid(color="#1e2e3e", linestyle="--", linewidth=0.6)
 
-def update(_frame):
-    with lock:
-        # Snapshot: mean dBm per bin, or NaN if bin doesn't have enough samples
-        means = np.array([
-            np.mean(buckets[a]) if len(buckets[a]) >= args.min_samples else np.nan
-            for a in BIN_DEGS
-        ])
-        n_samp   = samples
-        n_filled = int(np.sum(~np.isnan(means)))
+    # Fixed radial axis: 0 at center = (peak - dyn_range), outer rim = peak
+    ax.set_ylim(0, DYN)
+    r_ticks = np.linspace(0, DYN, 5)
+    ax.set_yticks(r_ticks)
+    # Tick labels are updated each frame to show actual dBm values
 
+    line, = ax.plot([], [], color="#00e5ff", linewidth=1.8, alpha=0.9)
+    fill_patch, = ax.fill([0], [0], color="#00e5ff", alpha=0.12)
+
+    ax.set_title(title, color="#cde4f5", pad=18, fontsize=12, fontweight="bold")
+    status_text = ax.text(0.5, -0.10, "waiting for data…",
+                          transform=ax.transAxes, ha="center",
+                          color="#88a0b8", fontsize=9)
+    return {"ax": ax, "line": line, "fill": fill_patch,
+            "status": status_text, "r_ticks": r_ticks}
+
+
+plot_az = make_polar_axis(121, "Azimuth cut (φ)")
+plot_el = make_polar_axis(122, "Elevation cut (elev)")
+
+suptitle = fig.suptitle("Antenna Pattern (live)", color="#cde4f5",
+                        fontsize=14, fontweight="bold")
+
+
+def compute_means(buckets):
+    """Mean dBm per bin, or NaN if the bin lacks enough samples."""
+    return np.array([
+        np.mean(buckets[a]) if len(buckets[a]) >= args.min_samples else np.nan
+        for a in BIN_DEGS
+    ])
+
+
+def render_plot(p, means):
+    """Draw one cut from its per-bin means. Each cut normalises to its own peak."""
+    ax = p["ax"]
+    line = p["line"]
+    fill_patch = p["fill"]
+    status_text = p["status"]
+    r_ticks = p["r_ticks"]
+
+    n_filled = int(np.sum(~np.isnan(means)))
     if n_filled == 0:
-        status_text.set_text(f"{n_samp} samples  ·  no bins ready yet")
-        return line, fill_patch
+        line.set_data([], [])
+        fill_patch.set_xy(np.zeros((1, 2)))
+        status_text.set_text("no bins ready yet")
+        return
 
     # Peak is the strongest mean across all populated bins
     p_peak = np.nanmax(means)
@@ -176,11 +206,28 @@ def update(_frame):
                        color="#88a0b8", fontsize=7)
 
     status_text.set_text(
-        f"{n_samp} samples  ·  {n_filled}/{NBINS} bins  ·  "
-        f"range {p_min:.1f}…{p_peak:.1f} dBm  ·  "
-        f"showing peak−{DYN:.0f} dB"
+        f"{n_filled}/{NBINS} bins  ·  {p_min:.1f}…{p_peak:.1f} dBm  ·  "
+        f"peak−{DYN:.0f} dB"
     )
-    return line, fill_patch
+
+
+def update(_frame):
+    with lock:
+        means_az = compute_means(buckets_az)
+        means_el = compute_means(buckets_el)
+        n_samp   = samples
+
+    render_plot(plot_az, means_az)
+    render_plot(plot_el, means_el)
+
+    if n_samp == 0:
+        suptitle.set_text("Antenna Pattern (live)  ·  waiting for data…")
+    else:
+        suptitle.set_text(f"Antenna Pattern (live)  ·  {n_samp} samples")
+
+    return (plot_az["line"], plot_az["fill"],
+            plot_el["line"], plot_el["fill"])
+
 
 ani = animation.FuncAnimation(fig, update, interval=200, blit=False)
 
