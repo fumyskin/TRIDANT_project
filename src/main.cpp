@@ -28,9 +28,9 @@ void setup() {
     bno_task_capture_zero();
     bno_task_start();
 
-    ble_task_start(); // create tasl + queue
-    ble_task_setup_ble(); // build service + characteristic
-    ble_task_start_advertising(); // go discoverable
+    //ble_task_start(); // create task + queue
+    //ble_task_setup_ble(); // build service + characteristic
+    //ble_task_start_advertising(); // go discoverable
 
     Serial.println("tasks started");
     Serial.println("phi_deg,theta_deg,elev_deg,P_dBm,mv,cal");   // <- added ,cal
@@ -50,15 +50,15 @@ void loop() {
                       mv_to_dbm(mv),
                       mv,
                       acc);
-        if (ble_task_has_clients()){
-            Sample s;
-            s.phi_deg = ang.azimuth_deg;
-            s.theta_deg = ang.polar_deg;
-            s.elev_deg = ang.elevation_deg;
-            s.mv = (uint16_t)mv;
-            s.acc = (uint8_t)acc;
-            ble_task_send_sample(s);
-        }
+        //if (ble_task_has_clients()){
+        //    Sample s;
+        //    s.phi_deg = ang.azimuth_deg;
+        //    s.theta_deg = ang.polar_deg;
+        //    s.elev_deg = ang.elevation_deg;
+        //    s.mv = (uint16_t)mv;
+        //    s.acc = (uint8_t)acc;
+        //    ble_task_send_sample(s);
+        //}
     } else {
         Serial.printf("waiting: haveP=%d haveAng=%d cal=%u\n", haveP, haveAng, acc);
     }
