@@ -41,7 +41,7 @@ except ImportError:
 # Column positions are normally taken from the header line in the log. This
 # FIELD map is the fallback if a file has no header. Order matches the packed
 # struct as currently emitted: phi, theta, elev, P_dBm, mv, cal.
-FIELD = {"az": 0, "el": 2, "dbm": 3, "mv": 4}
+FIELD = {"az": 0, "el": 2, "mv": 3}
 
 # Header-name -> canonical field. Add aliases here if your header differs.
 HEADER_ALIASES = {
@@ -60,8 +60,8 @@ HEADER_ALIASES = {
 # Slope sets pattern SHAPE; intercept only shifts the absolute reference and is
 # normalized out for pattern work. Replace placeholders with real two-point cal.
 CAL = {
-    "GNSS": dict(slope_mv_per_db=-22.0, intercept_mv=310.0),   # L1  ~1.575 GHz
-    "V2X":  dict(slope_mv_per_db=-22.0, intercept_mv=352.0),   #     ~5.9   GHz
+    "GNSS": dict(slope_mv_per_db=-25.0, intercept_mv=510.0),   # L1  ~1.575 GHz
+    "V2X":  dict(slope_mv_per_db=-25.0, intercept_mv=608.0),   #     ~5.9   GHz
 }
 
 def two_point(p1_dbm, v1_mv, p2_dbm, v2_mv):

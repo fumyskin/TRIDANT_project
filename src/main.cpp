@@ -8,8 +8,9 @@
 // Refer to APD8317 documentation for correct parametrization:
 // correct calibration:
 // NOTE: V2X and GNSS require different x intercepts: deal with it 
+// might be redundant
 constexpr float LPD_SLOPE_MV_PER_DB = -25.0f; // mV/dBm
-constexpr float LPD_INTERCEPT_MV    = 2100.0f; // mV
+constexpr float LPD_INTERCEPT_MV    = 500.0f; //mV
 
 static float mv_to_dbm(int mv) {
     return ((float)mv - LPD_INTERCEPT_MV) / LPD_SLOPE_MV_PER_DB;
@@ -42,12 +43,12 @@ void loop() {
     bool haveAng = bno_task_get_latest(&ang);
     uint32_t acc = bno_task_cal_accuracy();
 
+    //remove mv_to_dbm for correct measurenments
     if (haveP && haveAng) {
-        Serial.printf("%.1f,%.1f,%.1f,%.2f,%d, %u\n",
+        Serial.printf("%.1f,%.1f,%.1f,%d,%u\n",
                       ang.azimuth_deg,
                       ang.polar_deg,
                       ang.elevation_deg,
-                      mv_to_dbm(mv),
                       mv,
                       acc);
         //if (ble_task_has_clients()){

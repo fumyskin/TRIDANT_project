@@ -13,6 +13,9 @@ extern BNO085 Motion;        // global IMU object defined inside the CodeCell li
 
 namespace {
 constexpr int RUN_RATE_HZ = 10;
+// --- Antenna boresight in BODY frame. +X matches your current azimuth convention.
+//     Verify sign once (see note below); flip to -1.0f if elevation reads inverted.
+constexpr float BORESIGHT_BX = 1.0f, BORESIGHT_BY = 0.0f, BORESIGHT_BZ = 0.0f;
 
 QueueHandle_t latestQueue   = nullptr;
 TaskHandle_t  bnoTaskHandle = nullptr;
@@ -27,6 +30,15 @@ inline float wrap360(float deg) {
     return deg;
 }
 
+// Rotate a body-frame unit vector into world frame by quaternion (w,x,y,z) = R(q)*b
+inline void rotate_body_to_world(float w, float x, float y, float z,
+                                 float bx, float by, float bz,
+                                 float& vx, float& vy, float& vz) {
+  vx = (1.f-2.f*(y*y+z*z))*bx + 2.f*(x*y-w*z)*by     + 2.f*(x*z+w*y)*bz;
+  vy = 2.f*(x*y+w*z)*bx       + (1.f-2.f*(x*x+z*z))*by + 2.f*(y*z-w*x)*bz;
+  vz = 2.f*(x*z-w*y)*bx       + 2.f*(y*z+w*x)*by       + (1.f-2.f*(x*x+y*y))*bz;
+}
+
 void fill_sample(float roll, float pitch, float yaw, BnoSample* s) {
     s->azimuth_deg = wrap360(yaw - yaw_offset);
 
@@ -37,36 +49,47 @@ void fill_sample(float roll, float pitch, float yaw, BnoSample* s) {
     if (s->polar_deg > 180.0f) s->polar_deg = 180.0f;
 }
 
-float read_yaw_blocking() {
-    float r = 0, p = 0, y = 0;
-    while (!myCodeCell.Run(RUN_RATE_HZ)) {
-        delay(5);
-    }
-    myCodeCell.Motion_RotationNoMagRead(r, p, y);
-    return wrap360(y);
+void fill_sample_q(float w, float x, float y, float z, BnoSample* s) {
+  float vx, vy, vz;
+  rotate_body_to_world(w, x, y, z, BORESIGHT_BX, BORESIGHT_BY, BORESIGHT_BZ, vx, vy, vz);
+  float az = atan2f(vy, vx) * RAD_TO_DEG;              // [-180,180]
+  float el = atan2f(vz, hypotf(vx, vy)) * RAD_TO_DEG;  // [-90,90] — bounded, no asin clamp needed
+  s->azimuth_deg   = wrap360(az - yaw_offset);
+  s->elevation_deg = el;
+  s->polar_deg     = 90.0f - el;                       // [0,180] by construction; clamp now redundant
+}
+
+float read_yaw_blocking() {  // now reads boresight azimuth, not Euler yaw
+  while (!myCodeCell.Run(RUN_RATE_HZ)) delay(5);
+  float w=Motion.getGameReal(), x=Motion.getGameI(), y=Motion.getGameJ(), z=Motion.getGameK();
+  float vx, vy, vz;
+  rotate_body_to_world(w, x, y, z, BORESIGHT_BX, BORESIGHT_BY, BORESIGHT_BZ, vx, vy, vz);
+  return atan2f(vy, vx) * RAD_TO_DEG;
 }
 } // namespace
 
 static void bnoTask(void*) {
-    float roll = 0, pitch = 0, yaw = 0;
     for (;;) {
         if (myCodeCell.Run(RUN_RATE_HZ)) {
-            myCodeCell.Motion_RotationNoMagRead(roll, pitch, yaw);
             cal_accuracy = Motion.getRot_Accuracy() & 0x03;   // mask off delay bits
 
-            if (zero_requested) {              // single-owner runtime re-zero
-                yaw_offset = wrap360(yaw);
+            float w = Motion.getGameReal();
+            float x = Motion.getGameI();
+            float y = Motion.getGameJ();
+            float z = Motion.getGameK();
+
+            if (zero_requested) {              // re-zero in azimuth space, not Euler yaw
+                float vx, vy, vz;
+                rotate_body_to_world(w, x, y, z,
+                                     BORESIGHT_BX, BORESIGHT_BY, BORESIGHT_BZ,
+                                     vx, vy, vz);
+                yaw_offset = atan2f(vy, vx) * RAD_TO_DEG;
                 zero_requested = false;
             }
 
             BnoSample sample = {};
-            fill_sample(roll, pitch, yaw, &sample);
-
-            // Real game-rotation quaternion (valid: only game-RV is enabled here).
-            sample.qr = Motion.getGameReal();
-            sample.qi = Motion.getGameI();
-            sample.qj = Motion.getGameJ();
-            sample.qk = Motion.getGameK();
+            fill_sample_q(w, x, y, z, &sample);
+            sample.qr = w; sample.qi = x; sample.qj = y; sample.qk = z;
 
             sample.accuracy_rad = 0.0f;        // no radian estimate for game-RV
             xQueueOverwrite(latestQueue, &sample);
@@ -116,3 +139,5 @@ bool bno_task_get_latest(BnoSample* out) {
     if (!latestQueue || !out) return false;
     return xQueuePeek(latestQueue, out, 0) == pdTRUE;
 }
+
+
