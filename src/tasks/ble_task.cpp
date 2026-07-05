@@ -8,7 +8,7 @@
 #define MAX_CONNECTIONS 1
 #define SERVICE_UUID        "97dcc426-d11e-476e-95e2-79f064720640"
 #define CHARACTERISTIC_UUID "aae3a4f0-8e88-4bd0-8047-c6a8c2312a3d"
-#define DEVICE_NAME         "TRIDANT"   // was "ESP32_BLE" — scan for this now
+#define DEVICE_NAME         "TRIDANT"   
 
 namespace {
     NimBLEServer*         pServer = nullptr;
