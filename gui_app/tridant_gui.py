@@ -361,6 +361,7 @@ status_text = fig.text(0.5, 0.025, "", ha="center", family="monospace", fontsize
 def update(_frame):
     drain_queue()
     samples = list(raw_buf)                 # snapshot (main-thread only, cheap)
+    #pk = max((s["dbm"] for s in samples), default = float("nan"))
  
     lt_a, lr_a, mt_a, mr_a, mode_a = build_cut(samples, "az")
     lt_e, lr_e, mt_e, mr_e, mode_e = build_cut(samples, "el")
