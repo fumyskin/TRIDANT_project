@@ -46,6 +46,9 @@ PROFILE      = "GNSS_1G575"   # key into protocol.PROFILES
 AZ_FIELD     = "phi"       # field swept for the azimuth cut
 EL_FIELD     = "elev"      # field swept for the elevation cut
 
+R_MAX = -5.5  #TO CONFIRM !!!!!
+R_MIN = -60.0
+
 # ============================================================================
 # CALIBRATION  —  used when dBm is computed from mv (the default path).
 # ============================================================================
@@ -311,17 +314,21 @@ def build_cut(samples, kind):
         return empty, empty, empty, empty, mode
  
     c_ang, c_dbm = bin_reduce(angle, dbm, periodic)
-    peak = np.nanmax(c_dbm)
+    #peak = np.nanmax(c_dbm)
+    
  
     # markers = measured bin centers (truth)
-    mark_r = np.clip(c_dbm - peak, DB_FLOOR, 0.0)
+    #mark_r = np.clip(c_dbm - peak, DB_FLOOR, 0.0)
+    mark_r = np.clip(c_dbm, R_MIN, R_MAX)
     mark_th = np.radians(c_ang)
  
     if len(c_ang) < 2:                      # not enough for a curve; markers only
         return np.array([]), np.array([]), mark_th, mark_r, mode
  
     grid, di = interpolate(c_ang, c_dbm, periodic)
-    line_r = np.where(np.isnan(di), np.nan, np.clip(di - peak, DB_FLOOR, 0.0))
+    #line_r = np.where(np.isnan(di), np.nan, np.clip(di - peak, DB_FLOOR, 0.0))
+    line_r = np.where(np.isnan(di), np.nan, np.clip(di, R_MIN, R_MAX))
+
  
     if periodic:                            # close the loop ONLY if wrap is covered
         grid = np.append(grid, 360.0)       # (NaN at index 0 leaves it open)
@@ -337,8 +344,10 @@ ax_az = fig.add_subplot(1, 2, 1, projection="polar")
 ax_el = fig.add_subplot(1, 2, 2, projection="polar")
  
 for ax, title in ((ax_az, "Azimuth cut"), (ax_el, "Elevation cut")):
-    ax.set_ylim(DB_FLOOR, 0)
-    ax.set_yticks([0, -10, -20, -30, -40])
+    #ax.set_ylim(DB_FLOOR, 0)
+    ax.set_ylim(R_MIN, R_MAX)
+    #ax.set_yticks([0, -10, -20, -30, -40])
+    ax.set_yticks(list(range(int(R_MIN), int(R_MAX) + 1, 10)))
     ax.set_title(title, pad=18)
     ax.grid(True, alpha=0.4)
 

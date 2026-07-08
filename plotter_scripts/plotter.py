@@ -2,8 +2,9 @@
 """
 plot_pattern.py — turn CodeCell mV/orientation logs into antenna pattern plots.
 
-Reads one or more capture logs (as written by capture_serial.sh), converts the
-AD8317 detector millivolts to power in dBm with a per-band calibration, and draws
+Reads one or more capture logs (as written by capture_serial.sh / capture_ble.py),
+converts the AD8318 detector millivolts to power in dBm with a per-band calibration,
+and draws
 two polar antenna-pattern cuts: an azimuth cut and an elevation cut. Measured
 points are shown as markers; a null-safe interpolation draws the "continuous"
 pattern through them.
@@ -56,7 +57,7 @@ HEADER_ALIASES = {
 # ============================================================================
 # 2. CALIBRATION  —  used when dBm is computed from mv (the default path).
 # ============================================================================
-# AD8317: P_dBm = (mv - intercept_mv) / slope_mv_per_db   (slope negative).
+# AD8318: P_dBm = (mv - intercept_mv) / slope_mv_per_db   (slope negative).
 # Slope sets pattern SHAPE; intercept only shifts the absolute reference and is
 # normalized out for pattern work. Replace placeholders with real two-point cal.
 CAL = {
@@ -298,8 +299,14 @@ def plot_cut(ax, datasets, title, periodic, args):
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     vals = [d for _, _, d, _ in datasets if len(d)]
     peak = np.concatenate(vals).max() if vals else 0.0
-    floor = (0.0 if args.normalize else peak) - args.dyn_range
-    shift = -peak if args.normalize else 0.0
+    if args.normalize:                       # shape only: 0 dB at peak
+        shift, floor, top = -peak, -args.dyn_range, 0.0
+    elif args.rmax is not None:              # fixed absolute axis — matches the GUI
+        shift = 0.0
+        top = args.rmax
+        floor = args.rmin if args.rmin is not None else args.rmax - args.dyn_range
+    else:                                    # absolute dBm, axis auto-ranged to peak
+        shift, floor, top = 0.0, peak - args.dyn_range, peak + 1.0
 
     for i, (label, angle, dbm, sat) in enumerate(datasets):
         if len(angle) == 0:
@@ -307,9 +314,9 @@ def plot_cut(ax, datasets, title, periodic, args):
         c = colors[i % len(colors)]
         a_avg, d_avg = bin_average(angle, dbm, periodic)
         g, di = interpolate(a_avg, d_avg, periodic, args.interp)
-        ax.plot(np.radians(g), np.clip(di + shift, floor, None),
+        ax.plot(np.radians(g), np.clip(di + shift, floor, top),
                 "-", color=c, lw=1.6, label=label, zorder=3)
-        d_pts = np.clip(dbm + shift, floor, None)
+        d_pts = np.clip(dbm + shift, floor, top)
         ax.plot(np.radians(angle), d_pts, "o", color=c, ms=3.5, alpha=0.55, zorder=4)
         if sat.any():
             ax.plot(np.radians(angle[sat]), d_pts[sat], "x", color="red",
@@ -318,7 +325,7 @@ def plot_cut(ax, datasets, title, periodic, args):
     ax.set_title(title, pad=18, fontsize=12, weight="bold")
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
-    ax.set_rlim(floor, (0.0 if args.normalize else peak) + 1.0)
+    ax.set_rlim(floor, top)
     ax.set_rlabel_position(135)
     ax.text(np.radians(135), floor, "dB" if args.normalize else "dBm",
             ha="center", va="top", fontsize=8, alpha=0.7)
@@ -337,6 +344,11 @@ def main():
                          "the cut; 'all' plots every sample against the axis")
     ap.add_argument("--interp", choices=["pchip", "linear", "cubic"], default="pchip")
     ap.add_argument("--normalize", action="store_true", help="0 dB at peak")
+    ap.add_argument("--rmax", type=float, default=None,
+                    help="fixed outer edge in dBm (matches the GUI's R_MAX); "
+                         "omit to auto-range to the peak")
+    ap.add_argument("--rmin", type=float, default=None,
+                    help="fixed centre floor in dBm; defaults to rmax - dyn_range")
     ap.add_argument("--dyn-range", type=float, default=40.0)
     ap.add_argument("--save", default=None)
     args = ap.parse_args()

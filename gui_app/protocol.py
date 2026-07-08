@@ -7,8 +7,8 @@ assert SAMPLE_SIZE == 15
 
 # Host-owned calibration. Per-frequency profiles live here, not in firmware.
 PROFILES = {
-    "V2X_5G9":  {"slope_mv_per_db": -25.0, "intercept_mv": 2100.0},
-    "GNSS_1G575": {"slope_mv_per_db": -25.0, "intercept_mv": 2100.0},  # TODO: characterize
+    "V2X_5G9":  {"slope_mv_per_db": -25.0, "intercept_mv": 608.0},
+    "GNSS_1G575": {"slope_mv_per_db": -25.0, "intercept_mv": 510.0},  
 }
 
 def unpack(buf, profile="V2X_5G9"):

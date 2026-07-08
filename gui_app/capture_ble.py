@@ -16,6 +16,7 @@ Run:  pip install bleak
       python capture_ble.py -o -                    # CSV to stdout (pipe it)
       python capture_ble.py --fields phi,theta,elev,mv,cal   # pin column order
       python capture_ble.py --quiet                 # counter only, no row echo
+      python capture_ble.py --dbm --band GNSS       # add dbm column + live peak
 Stop: Ctrl-C  (the log is flushed per row, so a kill still leaves a usable file)
 """
 import argparse
@@ -33,7 +34,19 @@ import protocol
 DEVICE_NAME  = "TRIDANT"
 SERVICE_UUID = "97dcc426-d11e-476e-95e2-79f064720640"
 CHAR_UUID    = "aae3a4f0-8e88-4bd0-8047-c6a8c2312a3d"
-DEFAULT_PROFILE = "V2X_5G9"     # key into protocol.PROFILES; must match the sweep
+DEFAULT_PROFILE = "GNSS_1G575"     # key into protocol.PROFILES; must match the sweep
+
+# Calibration for the optional --dbm column (mirrors tridant_gui.py).
+# AD8318: P_dBm = (mv - intercept_mv) / slope_mv_per_db  (slope negative).
+# PLACEHOLDERS — replace with your real two-point cal.
+CAL = {
+    "GNSS": dict(slope_mv_per_db=-25.0, intercept_mv=510.0),   # L1  ~1.575 GHz
+    "V2X":  dict(slope_mv_per_db=-25.0, intercept_mv=608.0),   #     ~5.9   GHz
+}
+
+def mv_to_dbm(mv, band):
+    c = CAL[band]
+    return (mv - c["intercept_mv"]) / c["slope_mv_per_db"]
 
 
 def eprint(*a):
@@ -56,17 +69,35 @@ class Capture:
         self.rate_ts = deque(maxlen=30)
         self.header  = None
 
+        self.dbm     = args.dbm
+        self.band    = args.band
+        self.peak    = float("-inf")   # running max dBm, for boresight aiming
+        self.warned_no_mv = False
+
+
         self.to_stdout = args.output == "-"
-        self.dest = "<stdout>" if self.to_stdout else args.output
+        self.dest = "<stdout>" if self.to_stdout else str(args.output)
         self.sink = sys.stdout if self.to_stdout else open(args.output, "w", buffering=1)
         # echo rows to the terminal only when the CSV isn't already going there
         self.echo = (not self.quiet) and (not self.to_stdout)
 
+        if self.dbm:
+            c = CAL[self.band]
+            eprint(f"dbm column: band={self.band} "
+                   f"slope={c['slope_mv_per_db']} intercept={c['intercept_mv']} "
+                   f"(placeholder — edit CAL for real values; peak is offset-free)")
+ 
+
+
     #output
     def _emit_header(self, sample):
-        self.header = self.fields or list(sample.keys())
+        hdr = self.fields or list(sample.keys())
+        if self.dbm and "dbm" not in hdr:      # additive: mv stays, dbm appended
+            hdr = hdr + ["dbm"]
+        self.header = hdr
         eprint(f"fields: {','.join(self.header)}")
         self.sink.write(",".join(self.header) + "\n")
+
 
     def write_sample(self, sample):
         if self.header is None:
@@ -76,7 +107,9 @@ class Capture:
         self.count += 1
         self.rate_ts.append(time.time())
         if self.echo:
-            eprint(row)
+            eprint(row + (f"   peak={self.peak:6.1f} dBm"
+                          if self.dbm and self.peak > float("-inf") else ""))
+
 
     def rate(self):
         if len(self.rate_ts) >= 2:
@@ -93,7 +126,17 @@ class Capture:
     def on_notify(self, _sender, data: bytearray):
         if len(data) != protocol.SAMPLE_SIZE:
             return
-        self.write_sample(protocol.unpack(bytes(data), self.profile))
+        s = protocol.unpack(bytes(data), self.profile)
+        if self.dbm:
+            if "mv" in s:
+                d = mv_to_dbm(s["mv"], self.band)
+                s["dbm"] = d
+                if d > self.peak:
+                    self.peak = d
+            elif not self.warned_no_mv:
+                eprint("warning: no 'mv' field in sample; --dbm has nothing to convert")
+                self.warned_no_mv = True
+        self.write_sample(s)
 
 
 async def ble_loop(cap: Capture):
@@ -136,8 +179,10 @@ async def status_loop(cap: Capture):
     while not cap.stop:
         await asyncio.sleep(1.0)
         state = "conn" if cap.connected else "…"
+        peak = (f" peak={cap.peak:6.1f}dBm"
+                if cap.dbm and cap.peak > float("-inf") else "")
         sys.stderr.write(
-            f"\r[{state}] n={cap.count} rate={cap.rate():4.1f} Hz -> {cap.dest}   "
+            f"\r[{state}] n={cap.count} rate={cap.rate():4.1f} Hz{peak} -> {cap.dest}   "
         )
         sys.stderr.flush()
 
@@ -159,7 +204,7 @@ def parse_args():
 
     filename = datetime.now().strftime("tridant_%Y%m%d_%H%M%S.csv")
     default_out = log_dir/filename
-    
+
     p.add_argument("-o", "--output", default=default_out,
                    help="CSV path, or '-' for stdout (default: timestamped file)")
     p.add_argument("--profile", default=DEFAULT_PROFILE,
@@ -169,7 +214,12 @@ def parse_args():
                         "(default: every field protocol.unpack returns)")
     p.add_argument("--quiet", action="store_true",
                    help="suppress per-row echo; show only the live counter")
+    p.add_argument("--dbm", action="store_true",
+                   help="append a computed dbm column (mv is kept) and show running peak")
+    p.add_argument("--band", default="GNSS", choices=sorted(CAL),
+                   help="CAL band for the dbm column (default: GNSS)")
     return p.parse_args()
+
 
 
 if __name__ == "__main__":
