@@ -14,8 +14,8 @@ extern BNO085 Motion;        // global IMU object defined inside the CodeCell li
 namespace {
 constexpr int RUN_RATE_HZ = 10;
 // --- Antenna boresight in BODY frame. +X matches your current azimuth convention.
-//     Verify sign once (see note below); flip to -1.0f if elevation reads inverted.
-constexpr float BORESIGHT_BX = 1.0f, BORESIGHT_BY = 0.0f, BORESIGHT_BZ = 0.0f;
+// was: constexpr float BORESIGHT_BX = 1.0f, BORESIGHT_BY = 0.0f, BORESIGHT_BZ = 0.0f;
+constexpr float BORESIGHT_BX = 0.0f, BORESIGHT_BY = 1.0f, BORESIGHT_BZ = 0.0f;
 
 QueueHandle_t latestQueue   = nullptr;
 TaskHandle_t  bnoTaskHandle = nullptr;

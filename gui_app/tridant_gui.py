@@ -41,7 +41,7 @@ except ImportError:
 DEVICE_NAME  = "TRIDANT"  
 SERVICE_UUID = "97dcc426-d11e-476e-95e2-79f064720640"
 CHAR_UUID    = "aae3a4f0-8e88-4bd0-8047-c6a8c2312a3d"
-PROFILE      = "V2X_5G9"   # key into protocol.PROFILES
+PROFILE      = "GNSS_1G575"   # key into protocol.PROFILES
 
 AZ_FIELD     = "phi"       # field swept for the azimuth cut
 EL_FIELD     = "elev"      # field swept for the elevation cut
@@ -57,7 +57,7 @@ CAL = {
     "GNSS": dict(slope_mv_per_db=-25.0, intercept_mv=510.0),   # L1  ~1.575 GHz
     "V2X":  dict(slope_mv_per_db=-25.0, intercept_mv=608.0),   #     ~5.9   GHz
 }
-PLAUSIBLE_DBM = (-200.0, 200.0)
+PLAUSIBLE_DBM = (-90.0, 10.0)
 
 def mv_to_dbm(mv, band):
     c = CAL[band]
@@ -184,13 +184,21 @@ def extract_cut(samples, kind):
     elev = np.array([s["elev"] for s in samples], float)
     dbm = np.array([s["dbm"]  for s in samples], float)
 
-    periodic = (kind == "az")
+    periodic = True                         # both cuts are periodic now: az over
+                                            # phi, el over the unfolded vertical angle
     if kind == "az":
         angle = phi
         plane = np.abs(_wrap180(elev - EL_REF_DEG)) <= CUT_TOL_DEG
     else:
-        angle = elev
-        plane = np.abs(_wrap180(phi- AZ_REF_DEG)) <= CUT_TOL_DEG
+        # Elevation cut lives in the vertical plane through AZ_REF_DEG. Raw 'elev'
+        # is a latitude bounded to [-90,90]: it folds at the poles and can never
+        # trace a full vertical loop. Select the plane (front AND back halves,
+        # pole-robust) and unfold into a continuous phi_v in [0,360).
+        d = _wrap180(phi - AZ_REF_DEG)
+        line_dist = np.minimum(np.abs(d), 180.0 - np.abs(d))  # dist to plane LINE
+        near_pole = np.abs(elev) >= (90.0 - CUT_TOL_DEG)      # az meaningless here
+        plane = (line_dist <= CUT_TOL_DEG) | near_pole
+        angle = _unfold_elev(phi, elev, AZ_REF_DEG)
 
     if CUT_MODE == "all":
         sel, mode = np.ones(len(angle), bool), "all"
@@ -231,6 +239,22 @@ def bin_reduce(angle, dbm, periodic):
     order = np.argsort(centers)
     return centers[order], (10.0 * np.log10(np.array(red)))[order]
  
+# helper for unfolding
+def _unfold_elev(phi, elev, az0):
+    """Unfold latitude-style elevation into a continuous vertical-plane angle.
+
+    Raw elevation = atan2(vz, hypot(vx,vy)) is a latitude in [-90,90]; a full
+    360° sweep in a vertical plane folds it at the poles while the azimuth flips
+    ~180°. Use that flip to reflect the 'back' hemisphere so the result runs
+    continuously 0->360 around the vertical circle:
+        el    0 -> +90 ->  0 -> -90 ->  0
+        phi_v 0 ->  90 ->180 ->270 ->360
+    Poles join seamlessly (both branches agree at |el|=90)."""
+    d = _wrap180(phi - az0)                 # signed az offset from plane front
+    front = np.abs(d) <= 90.0
+    return np.where(front, elev % 360.0, 180.0 - elev) % 360.0
+
+
 
 def _gap_mask(grid, ang, periodic, max_gap):
     """False where a grid point sits in an unmeasured gap wider than max_gap."""
@@ -280,7 +304,7 @@ def interpolate(angle, dbm, periodic):
 def build_cut(samples, kind):
     """Full pipeline -> (line_theta_rad, line_r_dB, mark_theta_rad, mark_r_dB, mode).
     r is normalized so peak = 0 dB, floored at DB_FLOOR; NaN marks a gap."""
-    periodic = (kind == "az")
+    periodic = True
     angle, dbm, mode = extract_cut(samples, kind)
     if len(angle) == 0:
         empty = np.array([])
@@ -313,12 +337,19 @@ ax_az = fig.add_subplot(1, 2, 1, projection="polar")
 ax_el = fig.add_subplot(1, 2, 2, projection="polar")
  
 for ax, title in ((ax_az, "Azimuth cut"), (ax_el, "Elevation cut")):
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)              # clockwise, compass-style
     ax.set_ylim(DB_FLOOR, 0)
     ax.set_yticks([0, -10, -20, -30, -40])
     ax.set_title(title, pad=18)
     ax.grid(True, alpha=0.4)
+
+# Azimuth: compass style — 0° (front) at top, clockwise.
+ax_az.set_theta_zero_location("N")
+ax_az.set_theta_direction(1)
+
+# Elevation: vertical-plane view — phi_v=0 front horizon (right), 90 zenith (top),
+# 180 back horizon (left), 270 nadir (bottom).
+ax_el.set_theta_zero_location("E")
+ax_el.set_theta_direction(1)
  
 (line_az,) = ax_az.plot([], [], lw=1.8, zorder=3)
 (line_el,) = ax_el.plot([], [], lw=1.8, zorder=3)
