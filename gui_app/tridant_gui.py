@@ -57,8 +57,8 @@ R_MIN = -60.0
 # normalized out for pattern work. Replace placeholders with real two-point cal.
 BAND = "GNSS"   # "GNSS" (L1 ~1.575 GHz) or "V2X" (~5.9 GHz) — selects the LPD cal
 CAL = {
-    "GNSS": dict(slope_mv_per_db=-25.0, intercept_mv=510.0),   # L1  ~1.575 GHz
-    "V2X":  dict(slope_mv_per_db=-25.0, intercept_mv=608.0),   #     ~5.9   GHz
+    "GNSS": dict(slope_mv_per_db=-22.0, intercept_mv=315.0),   # L1  ~1.575 GHz
+    "V2X":  dict(slope_mv_per_db=-22.0, intercept_mv=352.0),   #     ~5.9   GHz
 }
 PLAUSIBLE_DBM = (-90.0, 10.0)
 
@@ -76,11 +76,11 @@ SAMPLE_HISTORY = 6000      #?
 
 REDUCE      = "mean"
 INTERP      = "pchip"      #pchip (null-safe)
-MAX_GAP_DEG = 20.0
+MAX_GAP_DEG = 45.0
 
 #Plane-cut selection
 CUT_MODE    = "auto"
-CUT_TOL_DEG = 10.0
+CUT_TOL_DEG = 20.0
 EL_REF_DEG  = 0.0
 AZ_REF_DEG  = 0.0
 MIN_CUT_PTS = 8

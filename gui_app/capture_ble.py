@@ -40,8 +40,8 @@ DEFAULT_PROFILE = "GNSS_1G575"     # key into protocol.PROFILES; must match the 
 # AD8318: P_dBm = (mv - intercept_mv) / slope_mv_per_db  (slope negative).
 # PLACEHOLDERS — replace with your real two-point cal.
 CAL = {
-    "GNSS": dict(slope_mv_per_db=-25.0, intercept_mv=510.0),   # L1  ~1.575 GHz
-    "V2X":  dict(slope_mv_per_db=-25.0, intercept_mv=608.0),   #     ~5.9   GHz
+    "GNSS": dict(slope_mv_per_db=-22.0, intercept_mv=315.0),   # L1  ~1.575 GHz
+    "V2X":  dict(slope_mv_per_db=-22.0, intercept_mv=352.0),   #     ~5.9   GHz
 }
 
 def mv_to_dbm(mv, band):
