@@ -1,15 +1,17 @@
-# TRIDANT_project
-Repository for microcontroller programming  repo of experimental setup of the multi-function Dielectric Resonator Antenna
-
-**This README is still in progress**
-
-We introduce the bluetooth-based telemetry and data measurements system for the Dielectric Resonator Antenna design proposed for the IEEE AP-S Antenna design contest. 
-The simple design of the architeture aims to function as a didatic toolkit for understanding live the antenna patterns received by the antenna transmitter.
-
-We suggest the following passages :
-1) read the **INSTRUCTIONS.pdf** (not inerted yet) and instructions for building and setting up the demonstration setup hardware.
-2) refer to the rest of this README for downloading the code setup.
-
+# TRIDANT project
+ 
+**T**wo-band **R**adiation-pattern **I**nstrument for **D**irectional **ANT**enna
+characterization — a portable system that measures and visualizes 2D antenna
+radiation patterns (azimuth and elevation cuts) in two bands:
+ 
+- **GNSS L1** — ~1.575 GHz
+- **V2X** — ~5.9 GHz
+A hand-aimed sensor head streams raw RF power and orientation over Bluetooth Low
+Energy to a host computer, which calibrates the samples, bins them by angle, and
+draws live polar radiation-pattern plots.
+ 
+> Built for the IEEE AP-S Student Design Contest. *(Edit this line to taste.)*
+ 
 ---
  
 ## Repository layout
@@ -93,3 +95,18 @@ pio device monitor         # open serial @ 115200 to watch output
 
 
 
+
+
+
+
+
+Repository for microcontroller programming  repo of experimental setup of the multi-function Dielectric Resonator Antenna
+
+**This README is still in progress**
+
+We introduce the bluetooth-based telemetry and data measurements system for the Dielectric Resonator Antenna design proposed for the IEEE AP-S Antenna design contest. 
+The simple design of the architeture aims to function as a didatic toolkit for understanding live the antenna patterns received by the antenna transmitter.
+
+We suggest the following passages :
+1) read the **INSTRUCTIONS.pdf** (not inerted yet) and instructions for building and setting up the demonstration setup hardware.
+2) refer to the rest of this README for downloading the code setup.
