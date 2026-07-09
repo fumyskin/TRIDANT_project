@@ -48,7 +48,7 @@ TRIDANT_project/
 ## How it works
  
 The firmware stays deliberately thin: it emits **raw sensor values only** — the
-AD8318 detector output in millivolts plus a quaternion-derived boresight
+AD8317 detector output in millivolts plus a quaternion-derived boresight
 orientation. All calibration, coordinate transformation, and visualization live
 **host-side**, in Python. This keeps captured logs re-calibratable after the
 fact and means changing bands never requires reflashing.
@@ -93,6 +93,54 @@ cd TRIDANT_project
 The repo has two independent halves — set up whichever you need.
  
 ---
+
+The repo has two independent halves — set up whichever you need.
+ 
+### 1. Firmware (PlatformIO)
+ 
+`platformio.ini` pins the board (`esp32-c6-devkitm-1`), the pioarduino
+ESP32 platform, and the required libraries (NimBLE-Arduino, CodeCell), so the
+dependencies install themselves on the first build.
+ 
+```bash
+pip install platformio          # skip if you use the VS Code extension
+ 
+pio run                         # build (downloads libs on first run)
+pio run -t upload               # flash over USB
+pio device monitor              # serial monitor @ 115200
+```
+
+### 2. Host tooling (Python)
+ 
+Use a virtual environment so the dependencies stay isolated:
+ 
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+ 
+pip install -r requirements.txt
+```
+ 
+---
+ 
+## Usage
+ 
+### Live pattern GUI
+ 
+Real-time polar plots over BLE. Scans for the sensor head, connects, and draws
+azimuth and elevation cuts as you sweep.
+ 
+```bash
+python gui_app/tridant_gui.py
+```
+ 
+Keys: `c` clears the accumulated pattern, `q` quits.
+
+
+
+
+
+
 
 ## INSTALLING THE TOOLCHAIN
 Before cloning the code, it's important to setup the correct toolchain for the code to properly compilet
