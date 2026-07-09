@@ -5,16 +5,13 @@
 #include <CodeCell.h>
 #include <Wire.h>
 
-// Refer to APD8317 documentation for correct parametrization:
-// correct calibration:
-// NOTE: V2X and GNSS require different x intercepts: deal with it 
 // might be redundant
-constexpr float LPD_SLOPE_MV_PER_DB = -25.0f; // mV/dBm
-constexpr float LPD_INTERCEPT_MV    = 500.0f; //mV
+//constexpr float LPD_SLOPE_MV_PER_DB = -25.0f; // mV/dBm
+//constexpr float LPD_INTERCEPT_MV    = 500.0f; //mV
 
-static float mv_to_dbm(int mv) {
-    return ((float)mv - LPD_INTERCEPT_MV) / LPD_SLOPE_MV_PER_DB;
-}
+//static float mv_to_dbm(int mv) {
+//    return ((float)mv - LPD_INTERCEPT_MV) / LPD_SLOPE_MV_PER_DB;
+//}
 
 BnoSample ang;
 

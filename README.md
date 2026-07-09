@@ -90,8 +90,6 @@ git clone https://github.com/fumyskin/TRIDANT_project.git
 cd TRIDANT_project
 ```
  
-The repo has two independent halves — set up whichever you need.
- 
 ---
 
 The repo has two independent halves — set up whichever you need.
@@ -124,6 +122,98 @@ pip install -r requirements.txt
 ---
  
 ## Usage
+### Live pattern GUI
+ 
+Real-time polar plots over BLE. Scans for the sensor head, connects, and draws
+azimuth and elevation cuts as you sweep.
+ 
+```bash
+python gui_app/tridant_gui.py
+```
+ 
+Keys: `c` clears the accumulated pattern, `q` quits.
+ 
+
+### Capture raw samples over BLE
+ 
+Logs raw wire values (mV, not dBm) to CSV so the session stays re-calibratable
+and re-plottable later.
+ 
+```bash
+python gui_app/capture_ble.py                      # timestamped CSV
+python gui_app/capture_ble.py -o dipole_az.csv     # explicit file
+python gui_app/capture_ble.py --dbm --band GNSS    # add dBm column + live peak
+```
+
+### Capture over serial (USB)
+ 
+Logs the CodeCell's serial output into band-specific files under `logs/`.
+Run it from inside `scripts/` (the default log directory is `../logs`):
+ 
+```bash
+cd scripts
+./logger.sh GNSS                 # fallback band = GNSS
+./logger.sh V2X /dev/ttyACM0     # explicit port
+```
+ 
+### Plot a captured log offline
+ 
+```bash
+python plotter_scripts/plotter.py logs/GNSS.log --normalize
+python plotter_scripts/plotter.py logs/GNSS.log logs/V2X.log
+```
+ 
+---
+## Calibration & configuration
+ 
+Calibration is host-owned. Per-band detector profiles (slope in mV/dB and
+intercept in mV) live in `gui_app/protocol.py`:
+ 
+```python
+PROFILES = {
+    "GNSS_1G575": {"slope_mv_per_db": -25.0, "intercept_mv": 510.0},
+    "V2X_5G9":    {"slope_mv_per_db": -25.0, "intercept_mv": 608.0},
+}
+```
+ 
+The conversion is `P_dBm = (mv − intercept_mv) / slope_mv_per_db`. For
+**normalized** pattern shape, intercept errors cancel and only the slope
+matters; a **fixed absolute** radial axis additionally needs a calibrated
+intercept and a known peak power.
+ 
+To set the radial limits (`R_MIN` / `R_MAX`) for a band, find the peak by
+sweeping the main beam with `capture_ble.py --dbm --band <BAND>` and reading the
+live `peak` value. See **`gui_app/parameters.md`** for the full per-band
+procedure and the current tuning values.
+ 
+---
+ 
+## Wire protocol
+ 
+| Field   | Type      | Meaning                              |
+|---------|-----------|--------------------------------------|
+| `phi`   | float32   | azimuth (deg)                        |
+| `theta` | float32   | polar/elevation angle (deg)          |
+| `elev`  | float32   | elevation (deg)                      |
+| `mv`    | uint16    | AD8318 detector output (millivolts)  |
+| `cal`   | uint8     | IMU calibration status               |
+ 
+Packed little-endian as `"<fffHB"` = **15 bytes**. Any change here must be made
+in both `src/tasks/sample.h` and `gui_app/protocol.py`, or the two sides will
+disagree.
+ 
+---
+ 
+## License
+
+blub
+
+
+
+
+
+
+
  
 ### Live pattern GUI
  
