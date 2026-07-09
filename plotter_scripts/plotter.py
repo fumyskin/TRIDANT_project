@@ -78,7 +78,7 @@ SAT_MV         = 2400.0
 DROP_SATURATED = False
 PLAUSIBLE_DBM  = (-90.0, 10.0)   # applied only to mv-derived dBm
 
-CUT_TOL_DEG      = 10.0   # plane-cut acceptance: |orthogonal angle - ref| <= this
+CUT_TOL_DEG      = 45.0   # plane-cut acceptance: |orthogonal angle - ref| <= this
 EL_REF_DEG       = 0.0    # elevation plane held during an azimuth sweep
 AZ_REF_DEG       = 0.0    # azimuth   plane held during an elevation sweep
 MIN_CUT_PTS      = 8      # auto mode: a plane cut needs at least this many points...
@@ -86,6 +86,13 @@ MIN_CUT_SPAN_DEG = 60.0   # ...spanning at least this many degrees, else use all
 MAX_GAP_DEG      = 20.0   # break the continuous curve across gaps wider than this
 BIN_DEG          = 1.0
 GRID_DEG         = 1.0
+
+# Fixed radial-axis bounds (dBm) for the default absolute plot. The scale stays
+# put regardless of the data; points outside are clipped onto the edge.
+# Override per-run with --rmax/--rmin. Set these to bracket your real levels.
+R_MIN            = -50.0
+R_MAX            = -20.0
+
 
 _TS_RE = re.compile(r"^\s*\d{4}-\d{2}-\d{2}T[\d:.\-+]+\s+")
 _BANDS = ("GNSS", "V2X")
@@ -301,12 +308,12 @@ def plot_cut(ax, datasets, title, periodic, args):
     peak = np.concatenate(vals).max() if vals else 0.0
     if args.normalize:                       # shape only: 0 dB at peak
         shift, floor, top = -peak, -args.dyn_range, 0.0
-    elif args.rmax is not None:              # fixed absolute axis — matches the GUI
+    elif args.rmax is not None:              # fixed absolute axis, from the CLI
         shift = 0.0
         top = args.rmax
         floor = args.rmin if args.rmin is not None else args.rmax - args.dyn_range
-    else:                                    # absolute dBm, axis auto-ranged to peak
-        shift, floor, top = 0.0, peak - args.dyn_range, peak + 1.0
+    else:                                    # fixed absolute axis, from R_MIN/R_MAX
+        shift, floor, top = 0.0, R_MIN, R_MAX
 
     for i, (label, angle, dbm, sat) in enumerate(datasets):
         if len(angle) == 0:
@@ -332,6 +339,44 @@ def plot_cut(ax, datasets, title, periodic, args):
     ax.grid(True, alpha=0.4)
 
 
+def cut_metrics(angle, dbm, periodic):
+    """Peak, linear-domain mean, and peak-to-null depth from the *binned* cut.
+    Binning (mW-averaged per BIN_DEG) is what makes these robust to single noisy
+    samples. Values are absolute — independent of --normalize."""
+    _, d = bin_average(angle, dbm, periodic)
+    if len(d) == 0:
+        return None
+    return dict(
+        peak=float(np.max(d)),
+        avg=10.0 * np.log10(np.mean(10.0 ** (d / 10.0))),   # mean in mW, back to dB
+        depth=float(np.max(d) - np.min(d)),                 # peak-to-null, dB
+        n=len(d),
+    )
+
+
+def draw_stats(ax, metrics, colors):
+    """Metrics strip below the plot: one column per band, header in its plot color."""
+    ax.axis("off")
+    ax.text(0.5, 1.02, "Azimuth-cut metrics", transform=ax.transAxes,
+            fontsize=13, weight="bold", ha="center", va="bottom")
+    n = max(len(metrics), 1)
+    for i, (band, m) in enumerate(metrics):
+        x = (i + 0.5) / n
+        c = colors[i % len(colors)]
+        ax.text(x, 0.82, band, transform=ax.transAxes, color=c,
+                fontsize=12, weight="bold", ha="center", va="top")
+        if m is None:
+            ax.text(x, 0.58, "no usable data", transform=ax.transAxes,
+                    fontsize=10, ha="center", va="top", style="italic")
+            continue
+        body = (f"Peak                {m['peak']:>6.1f} dBm\n"
+                f"Average             {m['avg']:>6.1f} dBm\n"
+                f"Peak-to-null depth  {m['depth']:>6.1f} dB")
+        ax.text(x, 0.58, body, transform=ax.transAxes, fontsize=10.5,
+                family="monospace", ha="center", va="top",
+                multialignment="left", linespacing=1.6)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Plot antenna pattern cuts from CodeCell logs.")
     ap.add_argument("logs", nargs="+")
@@ -345,8 +390,8 @@ def main():
     ap.add_argument("--interp", choices=["pchip", "linear", "cubic"], default="pchip")
     ap.add_argument("--normalize", action="store_true", help="0 dB at peak")
     ap.add_argument("--rmax", type=float, default=None,
-                    help="fixed outer edge in dBm (matches the GUI's R_MAX); "
-                         "omit to auto-range to the peak")
+                    help="fixed outer edge in dBm; overrides R_MAX. "
+                         "Omit to use the R_MIN/R_MAX module constants")
     ap.add_argument("--rmin", type=float, default=None,
                     help="fixed centre floor in dBm; defaults to rmax - dyn_range")
     ap.add_argument("--dyn-range", type=float, default=40.0)
@@ -371,17 +416,19 @@ def main():
               f"(az-cut {len(az_sets[-1][1])}, el-cut {len(el_sets[-1][1])})  "
               f"dBm source: {args.dbm_source}")
 
-    fig, (ax_az, ax_el) = plt.subplots(
-        1, 2, figsize=(12, 6.2), subplot_kw={"projection": "polar"})
-    plot_cut(ax_az, az_sets, "Azimuth cut", True, args)
-    plot_cut(ax_el, el_sets, "Elevation cut", False, args)
+    metrics = [(band, cut_metrics(angle, dbm, True))
+               for band, angle, dbm, _sat in az_sets]
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
-    h, l = ax_az.get_legend_handles_labels()
-    if h:
-        fig.legend(h, l, loc="lower center", ncol=len(l), frameon=False,
-                   bbox_to_anchor=(0.5, 0.0))
+    fig = plt.figure(figsize=(7.2, 8.4))
+    gs = fig.add_gridspec(2, 1, height_ratios=[4, 1])
+    ax_az  = fig.add_subplot(gs[0], projection="polar")
+    ax_txt = fig.add_subplot(gs[1])
+    plot_cut(ax_az, az_sets, "Azimuth cut", True, args)
+    draw_stats(ax_txt, metrics, colors)
+
     fig.suptitle("Antenna radiation pattern", fontsize=14, weight="bold")
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    fig.tight_layout()
     if args.save:
         fig.savefig(args.save, dpi=150, bbox_inches="tight")
         print(f"saved {args.save}")

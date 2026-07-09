@@ -34,7 +34,7 @@ import protocol
 DEVICE_NAME  = "TRIDANT"
 SERVICE_UUID = "97dcc426-d11e-476e-95e2-79f064720640"
 CHAR_UUID    = "aae3a4f0-8e88-4bd0-8047-c6a8c2312a3d"
-DEFAULT_PROFILE = "GNSS_1G575"     # key into protocol.PROFILES; must match the sweep
+DEFAULT_PROFILE = "V2X_5G9"     # key into protocol.PROFILES; must match the sweep
 
 # Calibration for the optional --dbm column (mirrors tridant_gui.py).
 # AD8318: P_dBm = (mv - intercept_mv) / slope_mv_per_db  (slope negative).

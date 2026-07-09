@@ -195,7 +195,7 @@ procedure and the current tuning values.
 | `phi`   | float32   | azimuth (deg)                        |
 | `theta` | float32   | polar/elevation angle (deg)          |
 | `elev`  | float32   | elevation (deg)                      |
-| `mv`    | uint16    | AD8318 detector output (millivolts)  |
+| `mv`    | uint16    | AD8317 detector output (millivolts)  |
 | `cal`   | uint8     | IMU calibration status               |
  
 Packed little-endian as `"<fffHB"` = **15 bytes**. Any change here must be made

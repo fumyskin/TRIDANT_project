@@ -46,7 +46,7 @@ PROFILE      = "GNSS_1G575"   # key into protocol.PROFILES
 AZ_FIELD     = "phi"       # field swept for the azimuth cut
 EL_FIELD     = "elev"      # field swept for the elevation cut
 
-R_MAX = -5.5  #TO CONFIRM !!!!!
+R_MAX = -20.5  #GNSS: -20.5 V2X: ?
 R_MIN = -60.0
 
 # ============================================================================
@@ -97,6 +97,9 @@ status_lock  = threading.Lock()
 # raw ring of {phi, theta, elev, dbm} - touched only on the main thread
 raw_buf = deque(maxlen=SAMPLE_HISTORY)
 rate_ts = deque(maxlen=30)
+
+# latest instantaneous reading for the live numeric readout (main thread only)
+live = {"mv": float("nan"), "dbm": float("nan")}
 
 def set_status(**kw):
     with status_lock:
@@ -158,6 +161,7 @@ def drain_queue():
         except queue.Empty:
             break
         dbm = mv_to_dbm(s["mv"], BAND)
+        live["mv"], live["dbm"] = s["mv"], dbm   # live readout: every sample
         if not (PLAUSIBLE_DBM[0] <= dbm <= PLAUSIBLE_DBM[1]):
             continue
         raw_buf.append({"phi": s[AZ_FIELD], "elev": s[EL_FIELD], "dbm": dbm})
@@ -339,44 +343,38 @@ def build_cut(samples, kind):
 
 # Plots
 
-fig = plt.figure(figsize=(12, 6.5))
-ax_az = fig.add_subplot(1, 2, 1, projection="polar")
-ax_el = fig.add_subplot(1, 2, 2, projection="polar")
- 
-for ax, title in ((ax_az, "Azimuth cut"), (ax_el, "Elevation cut")):
-    #ax.set_ylim(DB_FLOOR, 0)
-    ax.set_ylim(R_MIN, R_MAX)
-    #ax.set_yticks([0, -10, -20, -30, -40])
-    ax.set_yticks(list(range(int(R_MIN), int(R_MAX) + 1, 10)))
-    ax.set_title(title, pad=18)
-    ax.grid(True, alpha=0.4)
+fig = plt.figure(figsize=(7.0, 8.0))
+ax_az = fig.add_subplot(projection="polar")
+
+#ax_az.set_ylim(DB_FLOOR, 0)
+ax_az.set_ylim(R_MIN, R_MAX)
+#ax_az.set_yticks([0, -10, -20, -30, -40])
+ax_az.set_yticks(list(range(int(R_MIN), int(R_MAX) + 1, 10)))
+ax_az.set_title("Azimuth cut", pad=18)
+ax_az.grid(True, alpha=0.4)
 
 # Azimuth: compass style — 0° (front) at top, clockwise.
 ax_az.set_theta_zero_location("N")
-ax_az.set_theta_direction(1)
+ax_az.set_theta_direction(-1)
 
-# Elevation: vertical-plane view — phi_v=0 front horizon (right), 90 zenith (top),
-# 180 back horizon (left), 270 nadir (bottom).
-ax_el.set_theta_zero_location("E")
-ax_el.set_theta_direction(1)
- 
 (line_az,) = ax_az.plot([], [], lw=1.8, zorder=3)
-(line_el,) = ax_el.plot([], [], lw=1.8, zorder=3)
 (mark_az,) = ax_az.plot([], [], "o", ms=3.0, alpha=0.5, zorder=4)
-(mark_el,) = ax_el.plot([], [], "o", ms=3.0, alpha=0.5, zorder=4)
+
+# Live numeric readout slot, under the azimuth plot.
+live_text   = fig.text(0.5, 0.085, "", ha="center", family="monospace",
+                       fontsize=22, fontweight="bold")
 status_text = fig.text(0.5, 0.025, "", ha="center", family="monospace", fontsize=10)
  
  
 def update(_frame):
     drain_queue()
     samples = list(raw_buf)                 # snapshot (main-thread only, cheap)
-    #pk = max((s["dbm"] for s in samples), default = float("nan"))
- 
+
     lt_a, lr_a, mt_a, mr_a, mode_a = build_cut(samples, "az")
-    lt_e, lr_e, mt_e, mr_e, mode_e = build_cut(samples, "el")
     line_az.set_data(lt_a, lr_a); mark_az.set_data(mt_a, mr_a)
-    line_el.set_data(lt_e, lr_e); mark_el.set_data(mt_e, mr_e)
- 
+
+    live_text.set_text(f"{live['mv']:6.0f} mV    {live['dbm']:6.1f} dBm")
+
     rate = 0.0
     if len(rate_ts) >= 2:
         dt = rate_ts[-1] - rate_ts[0]
@@ -386,11 +384,11 @@ def update(_frame):
     with status_lock:
         st = dict(status)
     status_text.set_text(
-        f"[{st['state']}]  band={BAND}  cut az:{mode_a}/el:{mode_e}  "
+        f"[{st['state']}]  band={BAND}  cut az:{mode_a}  "
         f"rate={rate:4.1f} Hz  cal={st['cal']}/3  samples={st['count']}"
         f"    ('c' clear  ·  'q' quit)"
     )
-    return line_az, line_el, mark_az, mark_el, status_text
+    return line_az, mark_az, live_text, status_text
  
  
 def on_key(event):
@@ -406,10 +404,9 @@ def main():
     threading.Thread(target=ble_thread, daemon=True).start()
     fig.canvas.mpl_connect("key_press_event", on_key)
     _ani = FuncAnimation(fig, update, interval=100, blit=False, cache_frame_data=False)
-    fig.tight_layout(rect=[0, 0.06, 1, 1])
+    fig.tight_layout(rect=[0, 0.13, 1, 1])
     plt.show()
  
  
 if __name__ == "__main__":
     main()
- 
