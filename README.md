@@ -10,7 +10,7 @@ A hand-aimed sensor head streams raw RF power and orientation over Bluetooth Low
 Energy to a host computer, which calibrates the samples, bins them by angle, and
 draws live polar radiation-pattern plots.
  
-> Built for the IEEE AP-S Student Design Contest. *(Edit this line to taste.)*
+> Built for the IEEE AP-S Student Design Contest.
  
 ---
  
@@ -45,6 +45,25 @@ TRIDANT_project/
 ``` 
 ---
  
+## How it works
+ 
+The firmware stays deliberately thin: it emits **raw sensor values only** — the
+AD8318 detector output in millivolts plus a quaternion-derived boresight
+orientation. All calibration, coordinate transformation, and visualization live
+**host-side**, in Python. This keeps captured logs re-calibratable after the
+fact and means changing bands never requires reflashing.
+ 
+```
+  ┌─────────────────────────┐        BLE         ┌──────────────────────────┐
+  │  ESP32-C6 (CodeCell)     │   15-byte Sample   │  Host (Python)           │
+  │                          │  ───────────────▶  │                          │
+  │  BNO085 IMU  → orient.   │  phi, theta, elev, │  calibrate mV → dBm      │
+  │  AD8318 LPD  → mV        │  mv, cal           │  bin by angle → polar    │
+  └─────────────────────────┘                    │  live plot / CSV / offline│
+                                                  └──────────────────────────┘
+```
+---
+
 ## Prerequisites
  
 - **Firmware:** [PlatformIO](https://platformio.org/) (CLI or the VS Code
