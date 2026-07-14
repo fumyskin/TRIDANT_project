@@ -39,6 +39,7 @@ TRIDANT_project/
 │   └── interpolation_AD.py   # interpolation experiments
 ├── scripts/
 │   └── logger.sh             # serial (USB) → band-split log files
+├── 3d_models/                # printing models for the components used in the demo
 │
 ├── logs/      logs_ble/      # captured sessions (serial / BLE)
 └── plots/                    # rendered pattern figures
