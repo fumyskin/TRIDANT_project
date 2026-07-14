@@ -59,7 +59,7 @@ void fill_sample_q(float w, float x, float y, float z, BnoSample* s) {
   s->polar_deg     = 90.0f - el;                       // [0,180] by construction; clamp now redundant
 }
 
-float read_yaw_blocking() {  // now reads boresight azimuth, not Euler yaw
+float read_yaw_blocking() {  // now reads boresight azimuth
   while (!myCodeCell.Run(RUN_RATE_HZ)) delay(5);
   float w=Motion.getGameReal(), x=Motion.getGameI(), y=Motion.getGameJ(), z=Motion.getGameK();
   float vx, vy, vz;
@@ -98,9 +98,10 @@ static void bnoTask(void*) {
     }
 }
 
+// 2) spinning RUn() in loop so that BNO can detect stationairity and settle the gyro ZRO -> want accuracy = 3
 // Hold the board DEAD STILL on a stable surface for the whole window so the BNO
 // can detect stationarity and compute the gyro zero-rate offset. This is what
-// kills the 1°/s drift?? Returns the achieved fusion accuracy.
+// kills the 1°/s drift Returns the achieved fusion accuracy.
 bool bno_task_calibrate(uint32_t still_ms, uint8_t target_acc) {
     float r, p, y;
     uint32_t start = millis();
@@ -114,6 +115,7 @@ bool bno_task_calibrate(uint32_t still_ms, uint8_t target_acc) {
     return cal_accuracy >= target_acc;
 }
 
+// 1) selecting game rotation vector + gyro offset estimation 
 void bno_task_init(void) {
     myCodeCell.Init(MOTION_ROTATION_NO_MAG);
     // The wrapper never enables gyro calibration -> ZRO uncorrected -> ~1°/s drift.
@@ -122,6 +124,7 @@ void bno_task_init(void) {
     Motion.setCalibrationConfig(SH2_CAL_ACCEL | SH2_CAL_GYRO);
 }
 
+// 3) takes quaternion, rotates boresight vecotr into world frame, stores azimuth as yaw_offset
 void bno_task_capture_zero(void) {
     yaw_offset = read_yaw_blocking();
 }

@@ -98,8 +98,12 @@ status_lock  = threading.Lock()
 raw_buf = deque(maxlen=SAMPLE_HISTORY)
 rate_ts = deque(maxlen=30)
 
-# latest instantaneous reading for the live numeric readout (main thread only)
+# latest (EMA-smoothed) reading for the live numeric readout (main thread only)
 live = {"mv": float("nan"), "dbm": float("nan")}
+
+# Live-readout smoothing. EMA weight in (0, 1]: smaller = smoother but laggier.
+# 1.0 disables smoothing. ~0.2 ≈ averaging over ~5 samples (~0.5 s @ 10 Hz).
+LIVE_EMA_ALPHA = 0.2
 
 def set_status(**kw):
     with status_lock:
@@ -160,8 +164,15 @@ def drain_queue():
             s = sample_q.get_nowait()
         except queue.Empty:
             break
-        dbm = mv_to_dbm(s["mv"], BAND)
-        live["mv"], live["dbm"] = s["mv"], dbm   # live readout: every sample
+        mv  = s["mv"]
+        dbm = mv_to_dbm(mv, BAND)
+        # Live readout (display only): EMA-smooth mv, then derive dBm from the
+        # smoothed mv so the two stay consistent. Seed on the first sample
+        # (prev != prev is the NaN test). raw_buf below still gets the unsmoothed
+        # dbm — smoothing must never touch the pattern data.
+        prev = live["mv"]
+        live["mv"]  = mv if prev != prev else prev + LIVE_EMA_ALPHA * (mv - prev)
+        live["dbm"] = mv_to_dbm(live["mv"], BAND)
         if not (PLAUSIBLE_DBM[0] <= dbm <= PLAUSIBLE_DBM[1]):
             continue
         raw_buf.append({"phi": s[AZ_FIELD], "elev": s[EL_FIELD], "dbm": dbm})
