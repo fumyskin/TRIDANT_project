@@ -55,12 +55,12 @@ orientation. All calibration, coordinate transformation, and visualization live
 fact and means changing bands never requires reflashing.
  
 ```
-  ┌─────────────────────────┐        BLE         ┌──────────────────────────┐
-  │  ESP32-C6 (CodeCell)     │   15-byte Sample   │  Host (Python)           │
-  │                          │  ───────────────▶  │                          │
-  │  BNO085 IMU  → orient.   │  phi, theta, elev, │  calibrate mV → dBm      │
-  │  AD8317 LPD  → mV        │  mv, cal           │  bin by angle → polar    │
-  └─────────────────────────┘                    │  live plot / CSV / offline│
+  ┌─────────────────────────┐        BLE          ┌──────────────────────────┐
+  │  ESP32-C6 (CodeCell)    │   15-byte Sample    │  Host (Python)           │
+  │                         │  ───────────────▶  │                          │
+  │  BNO085 IMU  → orient.  │  phi, theta, elev,  │  calibrate mV → dBm      │
+  │  AD8317 LPD  → mV       │  mv, cal            │  bin by angle → polar    │
+  └─────────────────────────┘                     │ live plot / CSV / offline│
                                                   └──────────────────────────┘
 ```
 The wire format is a single source of truth shared across the language boundary (`src/tasks/sample.h` on the firmware side, `gui_app/protocol.py` on the host side), verified with `static_assert` in C++ and `struct.calcsize` in Python:
