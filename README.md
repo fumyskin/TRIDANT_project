@@ -11,7 +11,7 @@ Energy to a host computer, which calibrates the samples, bins them by angle, and
 draws live polar radiation-pattern plots.
  
 > Built for the IEEE AP-S Student Design Contest.
- 
+https://photos.app.goo.gl/PjTwk66SGvRQrtHY9
 ---
  
 ## Repository layout
